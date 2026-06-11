@@ -1,7 +1,7 @@
 extends Node
 
 # ============================================================
-# 临时截图测试：自动截取关键界面供人工检查渲染效果
+# 截图测试：自动截取关键界面供人工检查渲染效果
 # 运行: godot --path . res://test/shot_test.tscn
 # 输出: 项目目录/test/shots/*.png
 # ============================================================
@@ -57,6 +57,9 @@ func _shot(name_: String) -> void:
 func _wait(t: float) -> void:
 	await get_tree().create_timer(t).timeout
 
+func _gear(entry_id: String, rar: int) -> Dictionary:
+	return EquipmentFactory.build_from_entry(ItemCatalog.get_entry(entry_id), 2, rar)
+
 func _run() -> void:
 	var modal = main_node.modal_layer
 
@@ -73,58 +76,87 @@ func _run() -> void:
 	await _wait(0.5)
 	await _shot("03_map")
 
-	# 战斗（剑）
+	# 关卡预览（侦察）
+	var battle_node = null
+	for n in GameState.current_map.nodes:
+		if n.type == GameData.NodeType.BATTLE:
+			battle_node = n
+			break
+	if battle_node:
+		SignalBus.show_modal.emit("node_preview", { "node": battle_node })
+		await _wait(0.4)
+		await _shot("04_node_preview")
+		modal.close_all()
+
+	# 战斗（重甲 + 巨剑：检查英雄合成外观）
+	GameState.equipment.weapon = _gear("metal_巨剑", GameData.Rarity.EPIC)
+	GameState.equipment.armor = _gear("fire_板甲", GameData.Rarity.LEGENDARY)
+	GameState.equipment.accessory = _gear("water_秘语契珠", GameData.Rarity.RARE)
+	GameState._recalc_stats()
+	SignalBus.equipment_changed.emit("weapon", GameState.equipment.weapon)
 	GameState.enter_combat(false, false)
 	await _wait(0.8)
-	await _shot("04_combat_sword")
+	await _shot("05_combat_sword_plate")
 	main_node.combat_node.player_attack(0)
 	await _wait(0.25)
-	await _shot("05_combat_attack")
-	await _wait(2.0)
+	await _shot("06_combat_attack")
+	await _wait(2.2)
 
-	# 换弓战斗
-	var bow = EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.LEGENDARY)
-	while bow.key != "bow":
-		bow = EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.LEGENDARY)
-	GameState.equipment.weapon = bow
-	SignalBus.equipment_changed.emit("weapon", bow)
+	# 换弓 + 轻甲
+	GameState.equipment.weapon = _gear("wood_长弓", GameData.Rarity.LEGENDARY)
+	GameState.equipment.armor = _gear("earth_皮甲", GameData.Rarity.RARE)
+	GameState._recalc_stats()
+	SignalBus.equipment_changed.emit("weapon", GameState.equipment.weapon)
 	await _wait(0.3)
 	if main_node.combat_node and main_node.combat_node.can_player_act():
 		main_node.combat_node.player_attack(0)
-		await _wait(0.18)
-	await _shot("06_combat_bow")
-	await _wait(2.0)
+		await _wait(0.2)
+	await _shot("07_combat_bow")
+	await _wait(2.2)
 
-	# 奖励 + 背包叠加
+	# 奖励 + 背包叠加（含熔炼按钮/精华区）
+	GameState.bag.append(EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.EPIC))
+	GameState.essences.append({ "affix": "lifesteal", "from": "测试精华" })
 	GameState.pending_drop = EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.LEGENDARY)
 	SignalBus.show_modal.emit("reward", { "gold": 42, "drop": GameState.pending_drop })
 	await _wait(0.4)
-	await _shot("07_reward_legendary")
+	await _shot("08_reward_legendary")
 	SignalBus.show_modal.emit("bag", {})
 	await _wait(0.4)
-	await _shot("08_bag_over_reward")
+	await _shot("09_bag_over_reward")
 	modal.close_all()
 	GameState.pending_drop = null
 	GameState.change_state(GameState.State.MAP)
 	SignalBus.view_changed.emit("map")
 	await _wait(0.3)
 
-	# 图鉴 / 属性 / 存档位 / 事件
+	# 图鉴：装备库 100 件 / 怪物 / 五行
+	SignalBus.show_modal.emit("codex", { "tab": "equip" })
+	await _wait(0.5)
+	await _shot("10_codex_equip100")
+	modal.close_all()
 	SignalBus.show_modal.emit("codex", { "tab": "monster" })
 	await _wait(0.4)
-	await _shot("09_codex_monster")
+	await _shot("11_codex_monster")
 	modal.close_all()
+	SignalBus.show_modal.emit("codex", { "tab": "element" })
+	await _wait(0.4)
+	await _shot("12_codex_element")
+	modal.close_all()
+
+	# 属性（含套装/五行）/ 商店 / 事件
 	SignalBus.show_modal.emit("stats", {})
 	await _wait(0.4)
-	await _shot("10_stats")
+	await _shot("13_stats")
 	modal.close_all()
-	SignalBus.show_modal.emit("saves", {})
+	GameState.open_shop()
 	await _wait(0.4)
-	await _shot("11_saves")
+	await _shot("14_shop")
 	modal.close_all()
+	GameState.change_state(GameState.State.MAP)
 	GameState.open_event()
 	await _wait(0.4)
-	await _shot("12_event")
+	await _shot("15_event")
 	modal.close_all()
 
 	_restore_saves()

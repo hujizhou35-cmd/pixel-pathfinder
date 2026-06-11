@@ -3,10 +3,10 @@ extends Control
 
 # ============================================================
 # 战斗视图
-# - 英雄 4 帧动画，手持武器随装备实时变化（剑/弓/斧）
-# - 护甲稀有度光环；点击敌人选择目标
-# - 武器差异化攻击动画：剑突进斩击 / 斧重劈回旋 / 弓后撤射箭
-# - 敌人血条显示精确数值；漂浮伤害数字、命中火花、彩色日志
+# - 英雄整体外观由 PixelArt 按装备实时合成（武器在手、护甲改变体型配色）
+# - 怪物精灵运行时程序化生成（高细节 2 帧）；词条/元素/状态标签
+# - 行动按钮带冷却显示：盾击3 / 防御2 / 药水3 / 斧攻击1
+# - 武器差异化攻击动画：剑突进斩击 / 斧重劈回旋 / 弓双发箭矢
 # ============================================================
 
 const HERO_POS := Vector2(250, 560)       # 英雄脚底位置
@@ -23,12 +23,11 @@ var combat_node: CombatStateMachine = null
 
 var _hero: TextureRect
 var _hero_atlas: AtlasTexture
-var _hero_frame_h: float = 30.0
+var _hero_frame_h: float = 26.0
 var _hero_base_pos: Vector2
-var _weapon_rect: TextureRect
 var _armor_glow: ColorRect
 
-var _enemy_slots: Array = []   # [{root, sprite, atlas, hp_bar, hp_lbl, shield_lbl, name_lbl, frame_h, base_pos, ring}]
+var _enemy_slots: Array = []   # [{root, sprite, atlas, hp_bar, hp_lbl, shield_lbl, name_lbl, tag_lbl, status_lbl, frame_h, base_pos, ring}]
 var _selected: int = -1
 
 var _log: RichTextLabel
@@ -53,32 +52,14 @@ func _ready() -> void:
 	_armor_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_armor_glow)
 
-	# 英雄
-	var hero_tex = load("res://assets/sprites/hero.png")
+	# 英雄（程序化合成，随装备变化）
 	_hero_atlas = AtlasTexture.new()
-	_hero_atlas.atlas = hero_tex
-	_hero_frame_h = hero_tex.get_height() / 4.0
-	_hero_atlas.region = Rect2(0, 0, hero_tex.get_width(), _hero_frame_h)
 	_hero = TextureRect.new()
 	_hero.texture = _hero_atlas
 	_hero.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_hero.stretch_mode = TextureRect.STRETCH_SCALE
-	var hero_scale := 6.0
-	_hero.size = Vector2(hero_tex.get_width() * hero_scale, _hero_frame_h * hero_scale)
-	_hero_base_pos = Vector2(HERO_POS.x - _hero.size.x / 2.0, HERO_POS.y - _hero.size.y)
-	_hero.position = _hero_base_pos
 	_hero.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_hero)
-
-	# 手持武器图标（随装备变化）
-	_weapon_rect = TextureRect.new()
-	_weapon_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_weapon_rect.stretch_mode = TextureRect.STRETCH_SCALE
-	_weapon_rect.size = Vector2(44, 44)
-	_weapon_rect.position = Vector2(_hero.size.x * 0.68, _hero.size.y * 0.26)
-	_weapon_rect.pivot_offset = Vector2(22, 22)
-	_weapon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hero.add_child(_weapon_rect)
 
 	# 漂浮文字层
 	_float_layer = Control.new()
@@ -109,6 +90,7 @@ func _ready() -> void:
 	_btn_defend = _mk_action(bar, "防御 [3]", func(): _act("defend"))
 	_btn_potion = _mk_action(bar, "药水 [4]", func(): _act("potion"))
 	_btn_potion.tooltip_text = GameData.POTION_INFO.desc
+	_btn_defend.tooltip_text = "获得护盾（冷却 2 回合）；蓄势词条防御时叠层"
 
 	var hint = Label.new()
 	hint.text = "点击敌人选择目标 · 数字键快捷操作 · B 背包 · V 属性 · C 图鉴"
@@ -141,6 +123,7 @@ func _ready() -> void:
 	SignalBus.enemy_shield_changed.connect(_on_enemy_shield_changed)
 	SignalBus.enemy_defeated.connect(_on_enemy_defeated)
 	SignalBus.skill_cooldown_changed.connect(func(_t): _update_buttons())
+	SignalBus.cooldowns_changed.connect(_update_buttons)
 	SignalBus.player_turn_started.connect(_on_player_turn)
 	SignalBus.enemy_turn_started.connect(_on_enemy_turn)
 	SignalBus.potion_changed.connect(func(_n): _update_buttons())
@@ -161,23 +144,18 @@ func _mk_action(parent: Control, text: String, cb: Callable) -> Button:
 	return b
 
 # ------------------------------------------------------------
-# 英雄装备外观：手持武器 + 护甲光环
+# 英雄装备外观：整体合成精灵 + 护甲稀有度光环
 # ------------------------------------------------------------
 func _refresh_hero_gear() -> void:
-	var weapon = GameState.equipment.get("weapon")
-	if weapon:
-		var key = weapon.get("key", "sword")
-		var tex = load("res://assets/sprites/icons/%s.png" % key)
-		if tex:
-			_weapon_rect.texture = tex
-			_weapon_rect.visible = true
-			match key:
-				"sword": _weapon_rect.rotation_degrees = 24.0
-				"axe":   _weapon_rect.rotation_degrees = 40.0
-				"bow":   _weapon_rect.rotation_degrees = 0.0
-			_weapon_rect.modulate = Color.WHITE.lerp(UITheme.rarity_color(weapon.rarity), 0.25)
-	else:
-		_weapon_rect.visible = false
+	var tex = PixelArt.hero_texture(GameState.equipment)
+	_hero_atlas.atlas = tex
+	_hero_frame_h = tex.get_height() / 4.0
+	_set_hero_frame(0)
+	var hero_scale := 6.0
+	_hero.size = Vector2(tex.get_width() * hero_scale, _hero_frame_h * hero_scale)
+	_hero_base_pos = Vector2(HERO_POS.x - _hero.size.x / 2.0, HERO_POS.y - _hero.size.y)
+	_hero.position = _hero_base_pos
+	_hero.pivot_offset = Vector2(_hero.size.x / 2.0, _hero.size.y)
 
 	var armor = GameState.equipment.get("armor")
 	if armor:
@@ -213,13 +191,11 @@ func _enemy_x(i: int, n: int) -> float:
 		_: return [720.0, 930.0, 1130.0][mini(i, 2)]
 
 func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
-	var tex: Texture2D = null
+	var tex: Texture2D
 	if e.is_boss:
-		tex = load("res://assets/sprites/enemies/bosses/boss%d.png" % GameState.region)
+		tex = PixelArt.boss_texture(GameState.region, e.palette)
 	else:
-		tex = load("res://assets/sprites/enemies/%s.png" % e.get("sprite_key", "slime"))
-	if tex == null:
-		tex = load("res://assets/sprites/enemies/slime.png")
+		tex = PixelArt.enemy_texture(e.get("sprite_key", "slime"), e.palette)
 
 	var frame_h = tex.get_height() / 2.0
 	var atlas = AtlasTexture.new()
@@ -232,8 +208,8 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	var cx = _enemy_x(i, n)
 
 	var root = Control.new()
-	root.position = Vector2(cx - w / 2.0 - 12.0, GROUND_Y - h - 60.0)
-	root.size = Vector2(w + 24.0, h + 60.0)
+	root.position = Vector2(cx - w / 2.0 - 12.0, GROUND_Y - h - 78.0)
+	root.size = Vector2(w + 24.0, h + 78.0)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.gui_input.connect(func(ev):
 		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -263,11 +239,17 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	sprite.position = Vector2(12.0, 0)
 	sprite.pivot_offset = Vector2(w / 2.0, h)
 	sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if e.is_elite:
+		sprite.modulate = Color(1.12, 1.04, 0.9, 1.0)
 	root.add_child(sprite)
 
-	# 名称
+	# 名称（含元素标记）
 	var name_lbl = Label.new()
-	name_lbl.text = e.name
+	var elem = str(e.get("element", ""))
+	var ename = e.name
+	if elem != "":
+		ename = "〔%s〕%s" % [GameData.element_name(elem), e.name]
+	name_lbl.text = ename
 	if e.is_boss:
 		name_lbl.add_theme_color_override("font_color", UITheme.C_GOLD)
 	elif e.is_elite:
@@ -281,16 +263,36 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(name_lbl)
 
+	# 词条标签
+	var tag_lbl = Label.new()
+	var afx: Array = e.get("affixes", [])
+	tag_lbl.text = GameData.monster_affix_names(afx) if afx.size() > 0 else ""
+	tag_lbl.add_theme_font_size_override("font_size", 12)
+	tag_lbl.add_theme_color_override("font_color", Color("#e8a8ff"))
+	tag_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	tag_lbl.add_theme_constant_override("outline_size", 3)
+	tag_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tag_lbl.position = Vector2(0, h + 19.0)
+	tag_lbl.size = Vector2(w + 24.0, 16)
+	tag_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tips = []
+	for a in afx:
+		var ad = GameData.get_monster_affix(a)
+		tips.append("%s：%s" % [ad.name, ad.desc])
+	tag_lbl.tooltip_text = "\n".join(tips)
+	root.add_child(tag_lbl)
+
 	# 血条
+	var bar_y = h + 37.0
 	var hp_bg = Panel.new()
 	hp_bg.add_theme_stylebox_override("panel", UITheme.bar_style(UITheme.C_HP_BG))
-	hp_bg.position = Vector2(12.0, h + 24.0)
+	hp_bg.position = Vector2(12.0, bar_y)
 	hp_bg.size = Vector2(w, 14)
 	hp_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hp_bg)
 	var hp_bar = Panel.new()
 	hp_bar.add_theme_stylebox_override("panel", UITheme.bar_style(UITheme.C_HP))
-	hp_bar.position = Vector2(12.0, h + 24.0)
+	hp_bar.position = Vector2(12.0, bar_y)
 	hp_bar.size = Vector2(w, 14)
 	hp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hp_bar)
@@ -303,26 +305,38 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	hp_lbl.add_theme_constant_override("outline_size", 4)
 	hp_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hp_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	hp_lbl.position = Vector2(12.0, h + 22.0)
+	hp_lbl.position = Vector2(12.0, bar_y - 2.0)
 	hp_lbl.size = Vector2(w, 18)
 	hp_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hp_lbl)
 
-	# 护盾标签
+	# 护盾 + 状态标签
 	var shield_lbl = Label.new()
 	shield_lbl.add_theme_font_size_override("font_size", 13)
 	shield_lbl.add_theme_color_override("font_color", UITheme.C_SHIELD)
 	shield_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	shield_lbl.add_theme_constant_override("outline_size", 4)
 	shield_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	shield_lbl.position = Vector2(0, h + 40.0)
+	shield_lbl.position = Vector2(0, bar_y + 16.0)
 	shield_lbl.size = Vector2(w + 24.0, 16)
 	shield_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(shield_lbl)
 
+	var status_lbl = Label.new()
+	status_lbl.add_theme_font_size_override("font_size", 12)
+	status_lbl.add_theme_color_override("font_color", Color("#ffb44a"))
+	status_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	status_lbl.add_theme_constant_override("outline_size", 3)
+	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_lbl.position = Vector2(0, bar_y + 32.0)
+	status_lbl.size = Vector2(w + 24.0, 16)
+	status_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(status_lbl)
+
 	return {
 		"root": root, "sprite": sprite, "atlas": atlas, "frame_h": frame_h,
 		"hp_bar": hp_bar, "hp_lbl": hp_lbl, "bar_w": w, "shield_lbl": shield_lbl,
+		"status_lbl": status_lbl,
 		"base_pos": root.position, "ring": ring, "dead": false,
 	}
 
@@ -367,6 +381,8 @@ func _act(kind: String) -> void:
 		return
 	match kind:
 		"attack":
+			if combat_node.get_cooldown("attack") > 0:
+				return
 			_play_attack_anim()
 			combat_node.player_attack(_selected)
 		"skill":
@@ -375,9 +391,13 @@ func _act(kind: String) -> void:
 			_hero_lunge_anim(2)
 			combat_node.player_skill(_selected)
 		"defend":
+			if combat_node.get_cooldown("defend") > 0:
+				return
 			_hero_defend_anim()
 			combat_node.player_defend()
 		"potion":
+			if combat_node.get_cooldown("potion") > 0:
+				return
 			combat_node.player_potion()
 	_update_buttons()
 
@@ -391,16 +411,23 @@ func handle_key(idx: int) -> void:
 func _update_buttons() -> void:
 	var can = combat_node != null and is_instance_valid(combat_node) and combat_node.can_player_act()
 	var cd = GameState.combat_state.get("skill_cooldown", 0)
+	var cds: Dictionary = GameState.combat_state.get("cooldowns", {})
+	var atk_cd = int(cds.get("attack", 0))
+	var def_cd = int(cds.get("defend", 0))
+	var pot_cd = int(cds.get("potion", 0))
 	var weapon = GameState.equipment.get("weapon")
 	var wkey = weapon.get("key", "sword") if weapon else "sword"
-	var atk_names = { "sword": "挥剑", "bow": "射击", "axe": "劈砍" }
-	_btn_attack.text = "%s [1]" % atk_names.get(wkey, "攻击")
-	_btn_attack.disabled = not can
+	var atk_names = { "sword": "挥剑", "bow": "连射", "axe": "劈砍" }
+	var aname: String = atk_names.get(wkey, "攻击")
+	_btn_attack.text = ("%s [1]" % aname) if atk_cd <= 0 else ("%s 冷却(%d)" % [aname, atk_cd])
+	_btn_attack.disabled = not can or atk_cd > 0
 	_btn_skill.disabled = not can or cd > 0
 	_btn_skill.text = "盾击 [2]" if cd <= 0 else "盾击 (%d)" % cd
-	_btn_defend.disabled = not can
-	_btn_potion.disabled = not can or GameState.potions <= 0
-	_btn_potion.text = "药水 [4] ×%d" % GameState.potions
+	var focus = int(GameState.combat_state.get("focus", 0))
+	_btn_defend.text = ("防御 [3]" + (" ◆%d" % focus if focus > 0 else "")) if def_cd <= 0 else ("防御 (%d)" % def_cd)
+	_btn_defend.disabled = not can or def_cd > 0
+	_btn_potion.disabled = not can or GameState.potions <= 0 or pot_cd > 0
+	_btn_potion.text = ("药水 [4] ×%d" % GameState.potions) if pot_cd <= 0 else ("药水 (%d)" % pot_cd)
 
 func _on_player_turn() -> void:
 	_turn_label.text = "—— 你的回合 ——"
@@ -434,20 +461,21 @@ func _hero_sword_anim() -> void:
 	tw.tween_property(_hero, "position:x", _hero_base_pos.x, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func(): _set_hero_frame(0))
 
-## 斧：大幅突进 + 武器回旋 + 斩击
+## 斧：大幅突进 + 整体回旋 + 重斩
 func _hero_axe_anim() -> void:
 	_set_hero_frame(2)
 	var tw = create_tween()
 	tw.tween_property(_hero, "position:x", _hero_base_pos.x + 90.0, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(_weapon_rect, "rotation_degrees", 400.0, 0.26)
-	tw.tween_callback(func(): _spawn_slash(_target_pos(), Color("#ffb44a")))
-	tw.tween_property(_hero, "position:x", _hero_base_pos.x, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(_hero, "rotation_degrees", 18.0, 0.14)
 	tw.tween_callback(func():
-		_set_hero_frame(0)
-		_weapon_rect.rotation_degrees = 40.0
+		_spawn_slash(_target_pos(), Color("#ffb44a"))
+		_spawn_sparks(_target_pos(), Color("#ffb44a"), 10)
 	)
+	tw.tween_property(_hero, "position:x", _hero_base_pos.x, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(_hero, "rotation_degrees", 0.0, 0.2)
+	tw.tween_callback(func(): _set_hero_frame(0))
 
-## 弓：后撤蓄力 + 射出箭矢投射物
+## 弓：后撤蓄力 + 连发两箭
 func _hero_bow_anim() -> void:
 	_set_hero_frame(2)
 	var from = _hero_base_pos + Vector2(_hero.size.x * 0.85, _hero.size.y * 0.35)
@@ -455,6 +483,8 @@ func _hero_bow_anim() -> void:
 	var tw = create_tween()
 	tw.tween_property(_hero, "position:x", _hero_base_pos.x - 26.0, 0.10).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(func(): _spawn_arrow(from, to))
+	tw.tween_interval(0.12)
+	tw.tween_callback(func(): _spawn_arrow(from + Vector2(0, 6), to + Vector2(8, 4)))
 	tw.tween_property(_hero, "position:x", _hero_base_pos.x, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func(): _set_hero_frame(0))
 
@@ -475,6 +505,8 @@ func _hero_defend_anim() -> void:
 	tw.parallel().tween_property(_hero, "modulate", Color.WHITE, 0.3)
 
 func _set_hero_frame(f: int) -> void:
+	if _hero_atlas.atlas == null:
+		return
 	_hero_atlas.region = Rect2(0, f * _hero_frame_h, _hero_atlas.atlas.get_width(), _hero_frame_h)
 
 # ------------------------------------------------------------
@@ -533,6 +565,11 @@ func _on_player_attacked(target: int, damage: int, is_crit: bool) -> void:
 	if target < 0 or target >= _enemy_slots.size():
 		return
 	var slot = _enemy_slots[target]
+	var pos = slot.root.position + Vector2(slot.root.size.x / 2.0, 10.0)
+	if damage <= 0:
+		# 虚体闪避
+		_spawn_float("闪避", pos, Color("#b59cf4"), 20)
+		return
 	# 受击白闪 + 后仰
 	var tw = create_tween()
 	slot.sprite.modulate = Color(3.0, 3.0, 3.0, 1.0)
@@ -541,7 +578,6 @@ func _on_player_attacked(target: int, damage: int, is_crit: bool) -> void:
 	tw.tween_property(slot.root, "position:x", slot.base_pos.x + 14.0, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.chain().tween_property(slot.root, "position:x", slot.base_pos.x, 0.12)
 	# 漂浮数字 + 火花
-	var pos = slot.root.position + Vector2(slot.root.size.x / 2.0, 10.0)
 	_spawn_float("%d" % damage, pos, Color("#ffd95e") if is_crit else Color.WHITE, 30 if is_crit else 22)
 	_spawn_sparks(slot.root.position + slot.root.size / 2.0, Color("#ffd95e") if is_crit else Color(1, 1, 1, 0.8), 9 if is_crit else 5)
 	if is_crit:
@@ -586,7 +622,7 @@ func _spawn_float(text: String, pos: Vector2, col: Color, fsize: int) -> void:
 	tw.chain().tween_callback(lbl.queue_free)
 
 # ------------------------------------------------------------
-# 血条 / 阵亡
+# 血条 / 状态 / 阵亡
 # ------------------------------------------------------------
 func _on_enemy_hp_changed(enemy_index: int, _cur: int, _max: int) -> void:
 	if enemy_index < 0:
@@ -615,6 +651,17 @@ func _refresh_bar(i: int) -> void:
 		tw.tween_property(slot.hp_bar, "size:x", target_w, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	slot.hp_lbl.text = "%d / %d" % [maxi(0, e.hp), e.maxhp]
 	slot.shield_lbl.text = ("◈ 护盾 %d" % e.shield) if e.shield > 0 else ""
+	# 状态标签
+	var status = []
+	if int(e.get("burn", 0)) > 0:
+		status.append("灼烧(%d)" % e.burn)
+	if int(e.get("stun", 0)) > 0:
+		status.append("眩晕")
+	if int(e.get("weaken", 0)) > 0:
+		status.append("减攻(%d)" % e.weaken)
+	if e.get("raged", false) or e.get("berserk_done", false):
+		status.append("狂暴")
+	slot.status_lbl.text = " · ".join(status)
 	if e.hp <= 0 and not slot.dead:
 		_mark_dead(i)
 
@@ -628,6 +675,7 @@ func _mark_dead(i: int) -> void:
 		return
 	slot.dead = true
 	slot.hp_lbl.text = "0 / %d" % _enemies()[i].maxhp if i < _enemies().size() else ""
+	slot.status_lbl.text = ""
 	# 倒地：倾倒 + 下沉 + 淡出
 	var tw = create_tween()
 	tw.set_parallel(true)
@@ -663,9 +711,10 @@ func _process(delta: float) -> void:
 		_anim_t = 0.0
 		_frame_flip = not _frame_flip
 		# 英雄待机帧（仅在非攻击/受伤状态切换 idle0/idle1）
-		var cur_y = _hero_atlas.region.position.y
-		if cur_y < _hero_frame_h * 2.0 - 0.5:
-			_set_hero_frame(1 if _frame_flip else 0)
+		if _hero_atlas.atlas != null:
+			var cur_y = _hero_atlas.region.position.y
+			if cur_y < _hero_frame_h * 2.0 - 0.5:
+				_set_hero_frame(1 if _frame_flip else 0)
 		# 敌人 2 帧切换
 		for slot in _enemy_slots:
 			if slot.dead:

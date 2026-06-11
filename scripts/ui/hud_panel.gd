@@ -297,15 +297,15 @@ func _on_potion(n: int) -> void:
 
 func _on_region(r: int) -> void:
 	var biome = GameData.get_biome(r)
-	_region_lbl.text = "区域 %d/%d · %s" % [r + 1, GameData.BIOMES.size(), biome.name]
+	var cyc = ("周目%d · " % (GameState.cycle + 1)) if GameState.cycle > 0 else ""
+	_region_lbl.text = "%s区域 %d/%d · %s" % [cyc, r + 1, GameData.BIOMES.size(), biome.name]
 
 func refresh_equipment() -> void:
 	for slot in _slot_buttons:
 		var entry = _slot_buttons[slot]
 		var it = GameState.equipment.get(slot)
 		if it:
-			var icon_key = SLOT_ICON.get(it.get("key", ""), "armor")
-			entry.icon.texture = load("res://assets/sprites/icons/%s.png" % icon_key)
+			entry.icon.texture = PixelArt.item_icon(it)
 			entry.icon.visible = true
 			entry.lvl.text = "+%d" % it.level if it.level > 0 else ""
 			var rc = UITheme.rarity_color(it.rarity)

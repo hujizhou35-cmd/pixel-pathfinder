@@ -182,21 +182,26 @@ const BOSS_LORE = [
 # ============================================================
 static func compose_item_lore(item: Dictionary) -> Array:
 	var lines = []
-	var prefix = _extract_prefix(item)
+	var prefix = str(item.get("prefix", _extract_prefix(item)))
 	var key = item.get("key", "sword")
 	var base = BASE_LORE.get(key, BASE_LORE["sword"])
 	var seed_val = hash(item.get("name", "")) % 1000
 
+	# 图鉴库条目文案（[0] 元素风味 / [1] 基底来历）
+	var cat_lore: Array = []
+	if item.has("catalog_id"):
+		cat_lore = ItemCatalog.get_entry(str(item.catalog_id)).get("lore", [])
+
 	# 第 1 条：名称来历（前缀故事）
 	lines.append(PREFIX_LORE.get(prefix, "来历不明，但分量很实在。"))
 
-	# 第 2 条（稀有+）：器物来历
+	# 第 2 条（稀有+）：基底来历
 	if item.rarity >= GameData.Rarity.RARE:
-		lines.append(base.origin)
+		lines.append(str(cat_lore[1]) if cat_lore.size() > 1 else base.origin)
 
-	# 第 3 条（史诗+）：工艺细节 + 一段轶事
+	# 第 3 条（史诗+）：元素工艺 + 一段轶事
 	if item.rarity >= GameData.Rarity.EPIC:
-		lines.append(base.craft)
+		lines.append(str(cat_lore[0]) if cat_lore.size() > 0 else base.craft)
 		lines.append(EPIC_EXTRA[seed_val % EPIC_EXTRA.size()])
 
 	# 第 4 条（传说）：传说级逸闻

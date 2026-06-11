@@ -2,17 +2,20 @@ class_name CombatManager
 extends RefCounted
 
 # ============================================================
-# 战斗管理器 - 设置和管理战斗
+# 战斗管理器
+# - roll_foes: 预先掷出关卡的怪物构成（种类/词条/元素），供地图预览
+# - build_enemy: 按构成确定性地生成战斗实例（预览数值 = 实战数值）
+# - 数值随区域与无限周目(cycle)缩放；词条组合产生大量变种
 # ============================================================
 
-static func setup_combat(region: int, depth: int, elite: bool, boss: bool) -> Dictionary:
-	var enemies = []
+## 掷出一场战斗的怪物构成；存入地图节点，进场前可预览
+static func roll_foes(region: int, cycle: int, elite: bool, boss: bool) -> Array:
 	var biome = GameData.get_biome(region)
-
+	var foes = []
 	if boss:
-		enemies.append(_create_boss(region, depth, biome))
+		foes.append(_roll_foe(region, cycle, biome, false, true))
 	elif elite:
-		enemies.append(_create_enemy(region, depth, biome, true))
+		foes.append(_roll_foe(region, cycle, biome, true, false))
 	else:
 		var roll = randf()
 		var n = 1
@@ -21,88 +24,179 @@ static func setup_combat(region: int, depth: int, elite: bool, boss: bool) -> Di
 		elif roll < 0.60:
 			n = 2
 		for i in range(n):
-			enemies.append(_create_enemy(region, depth, biome, false))
+			foes.append(_roll_foe(region, cycle, biome, false, false))
+	return foes
+
+static func _roll_foe(region: int, cycle: int, biome: Dictionary, elite: bool, boss: bool) -> Dictionary:
+	var key = ""
+	var innate = ""
+	if boss:
+		key = "boss"
+	else:
+		key = biome.enemy_keys[randi() % biome.enemy_keys.size()]
+		innate = str(GameData.get_enemy_type(key).get("innate", ""))
+
+	# 元素：默认随区域，30% 变异成其它元素
+	var elem = str(biome.get("element", "wood"))
+	if randf() < 0.30:
+		elem = GameData.ELEMENT_KEYS[randi() % GameData.ELEMENT_KEYS.size()]
+
+	# 词条：自带 + 随机追加（区域/周目/级别越高越多）
+	var affixes = []
+	if innate != "":
+		affixes.append(innate)
+	var extra = 0
+	if boss:
+		extra = 2
+	elif elite:
+		extra = 1 + (1 if region >= 3 or cycle > 0 else 0)
+	else:
+		var chance = 0.20 + region * 0.07 + cycle * 0.20
+		if randf() < chance:
+			extra = 1
+		if cycle > 0 and randf() < 0.25:
+			extra += 1
+	var pool = GameData.MONSTER_AFFIX_KEYS.duplicate()
+	pool.shuffle()
+	for k in pool:
+		if extra <= 0:
+			break
+		if affixes.has(k):
+			continue
+		affixes.append(k)
+		extra -= 1
+
+	return { "key": key, "elite": elite, "boss": boss, "affixes": affixes, "element": elem }
+
+## 确定性数值（供预览与实战共用）
+static func enemy_stats_for(foe: Dictionary, region: int, cycle: int) -> Dictionary:
+	var boss = bool(foe.get("boss", false))
+	var elite = bool(foe.get("elite", false))
+	var hp_mult = 1.0
+	var atk_mult = 1.0
+	if not boss:
+		var t = GameData.get_enemy_type(str(foe.key))
+		hp_mult = t.hp_mult
+		atk_mult = t.atk_mult
+	if boss:
+		hp_mult *= 5.5
+		atk_mult *= 1.5
+	elif elite:
+		hp_mult *= 2.2
+		atk_mult *= 1.3
+	var affixes: Array = foe.get("affixes", [])
+	if affixes.has("tough"):
+		hp_mult *= 1.5
+	if affixes.has("mighty"):
+		atk_mult *= 1.3
+	# 周目缩放
+	var cyc_hp = 1.0 + cycle * GameData.COMBAT["cycle_hp_mult"]
+	var cyc_atk = 1.0 + cycle * GameData.COMBAT["cycle_atk_mult"]
+	return {
+		"hp": maxi(1, roundi((20.0 + region * 16.0) * hp_mult * cyc_hp)),
+		"atk": maxi(1, roundi((5.0 + region * 3.4) * atk_mult * cyc_atk)),
+	}
+
+## 按构成生成战斗实例
+static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
+	var biome = GameData.get_biome(region)
+	var boss = bool(foe.get("boss", false))
+	var elite = bool(foe.get("elite", false))
+	var st = enemy_stats_for(foe, region, cycle)
+	var affixes: Array = foe.get("affixes", []).duplicate()
+
+	var name: String
+	var sprite_key: String
+	var palette: Dictionary
+	var traits = null
+	if boss:
+		name = biome.boss.name
+		sprite_key = "boss"
+		palette = biome.boss.palette
+		traits = {
+			"list": biome.boss.traits.duplicate(),
+			"shield_used": false,
+			"raged": false,
+			"turn": 0,
+		}
+	else:
+		var template = GameData.get_enemy_type(str(foe.key))
+		name = ("精英" + template.name) if elite else template.name
+		sprite_key = str(foe.key)
+		palette = template.palette
+
+	var gold_mult = 6.0 if boss else (3.0 if elite else 1.0)
+	var gold_reward = roundi((8.0 + region * 6.0) * gold_mult * (1.0 + cycle * GameData.COMBAT["cycle_gold_mult"]) * randf_range(0.8, 1.2))
+
+	var shield = 0
+	if affixes.has("shielded"):
+		shield = roundi(st.hp * 0.25)
+
+	return {
+		"name": name,
+		"sprite_key": sprite_key,
+		"palette": palette,
+		"maxhp": st.hp,
+		"hp": st.hp,
+		"atk": st.atk,
+		"base_atk": st.atk,
+		"gold_reward": gold_reward,
+		"shield": shield,
+		"is_boss": boss,
+		"is_elite": elite,
+		"traits": traits,
+		"affixes": affixes,
+		"element": str(foe.get("element", "")),
+		"scale": 7.0 if boss else (5.4 if elite else 4.4),
+		"anim": 0,
+		"hit_flash": 0,
+		"counted": false,
+		# 运行时状态
+		"stun": 0,
+		"weaken": 0,
+		"burn": 0,
+		"burn_dmg": 0,
+		"berserk_done": false,
+	}
+
+## 建立战斗数据；foes 为空时现场掷一组（事件遭遇战等）
+static func setup_combat(region: int, cycle: int, elite: bool, boss: bool, foes: Array = []) -> Dictionary:
+	if foes.is_empty():
+		foes = roll_foes(region, cycle, elite, boss)
+	var enemies = []
+	for foe in foes:
+		enemies.append(build_enemy(foe, region, cycle))
 
 	var stats = GameState.get_player_stats()
-	var shield = stats.shield_start
+	var shield = _shield_gain(stats, stats.shield_start)
 	if shield > 0:
-		SignalBus.combat_log_message.emit("壁垒词条：战斗开始获得 %d 护盾" % shield, "system")
+		SignalBus.combat_log_message.emit("壁垒：战斗开始获得 %d 护盾" % shield, "system")
+
+	var is_elite = elite
+	var is_boss = boss
+	for e in enemies:
+		if e.is_boss:
+			is_boss = true
+		elif e.is_elite:
+			is_elite = true
 
 	return {
 		"enemies": enemies,
 		"player_turn": true,
 		"skill_cooldown": 0,
+		"cooldowns": { "attack": 0, "defend": 0, "potion": 0 },
+		"focus": 0,
 		"shield": shield,
 		"turn": 0,
 		"first_attack": true,
-		"is_elite": elite,
-		"is_boss": boss,
+		"is_elite": is_elite,
+		"is_boss": is_boss,
 		"hero_anim": 0,
 		"busy": false,
 	}
 
-static func _create_enemy(region: int, depth: int, biome: Dictionary, is_elite: bool) -> Dictionary:
-	var enemy_keys = biome.enemy_keys
-	var key = enemy_keys[randi() % enemy_keys.size()]
-	var template = GameData.get_enemy_type(key)
-	var dscale = 1.0 + depth * 0.10
-	var name = template.name
-	var hp_mult = template.hp_mult
-	var atk_mult = template.atk_mult
-
-	if is_elite:
-		name = "精英" + name
-		hp_mult *= 2.0
-		atk_mult *= 1.25
-
-	var maxhp = roundi((16.0 + region * 13.0) * hp_mult * dscale)
-	var atk = roundi((4.0 + region * 3.0) * atk_mult * dscale)
-	var gold_reward = roundi((8.0 + region * 6.0) * (3.0 if is_elite else 1.0) * randf_range(0.8, 1.2))
-
-	return {
-		"name": name,
-		"sprite_key": key,
-		"palette": template.palette,
-		"maxhp": maxhp,
-		"hp": maxhp,
-		"atk": atk,
-		"gold_reward": gold_reward,
-		"shield": 0,
-		"is_boss": false,
-		"is_elite": is_elite,
-		"traits": null,
-		"scale": 5.4 if is_elite else 4.4,
-		"anim": 0,
-		"hit_flash": 0,
-		"counted": false,
-	}
-
-static func _create_boss(region: int, depth: int, biome: Dictionary) -> Dictionary:
-	var boss_data = biome.boss
-	var dscale = 1.0 + depth * 0.10
-	var maxhp = roundi((16.0 + region * 13.0) * 5.2 * dscale)
-	var atk = roundi((4.0 + region * 3.0) * 1.4 * dscale)
-	var gold_reward = roundi((8.0 + region * 6.0) * 6.0 * randf_range(0.8, 1.2))
-
-	return {
-		"name": boss_data.name,
-		"sprite_key": boss_data.sprite,
-		"palette": boss_data.palette,
-		"maxhp": maxhp,
-		"hp": maxhp,
-		"atk": atk,
-		"gold_reward": gold_reward,
-		"shield": 0,
-		"is_boss": true,
-		"is_elite": false,
-		"traits": {
-			"list": boss_data.traits.duplicate(),
-			"shield_used": false,
-			"raged": false,
-			"turn": 0,
-		},
-		"scale": 7.0,
-		"anim": 0,
-		"hit_flash": 0,
-		"counted": false,
-	}
+## 护盾获取统一入口（盾魂词条/远古套装加成）
+static func _shield_gain(stats: Dictionary, base: int) -> int:
+	if base <= 0:
+		return 0
+	return maxi(1, roundi(base * (1.0 + stats.get("shield_gain_pct", 0) / 100.0)))

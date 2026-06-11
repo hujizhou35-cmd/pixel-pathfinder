@@ -34,25 +34,110 @@ const ACCESSORY_TEMPLATES = {
 }
 
 # ---- 词条定义 ----
+# kind: off 进攻 / def 防御 / exp 探索
+# 可组流派：吸血流(吸血+弓双段+迅捷)、连击流(弓+迅捷+连环+震慑)、
+# 一击流(斧+蓄势+处决+残忍)、反伤坦克(棘甲+荆棘套装+石肤)
 const AFFIXES = {
-	"crit":    { "name": "精准",     "desc": "暴击率 +10%",              "kind": "off" },
-	"critdmg": { "name": "残忍",     "desc": "暴击伤害 +40%",            "kind": "off" },
-	"swift":   { "name": "迅捷",     "desc": "15% 概率连击",            "kind": "off" },
-	"pierce":  { "name": "穿透",     "desc": "攻击力 +12%",              "kind": "off" },
-	"chain":   { "name": "连锁",     "desc": "攻击对其它敌人溅射 30%",  "kind": "off" },
-	"block":   { "name": "守护",     "desc": "+10% 概率减半伤害",       "kind": "def" },
-	"bulwark": { "name": "壁垒",     "desc": "战斗开始时获得 10 护盾",  "kind": "def" },
-	"regen":   { "name": "再生",     "desc": "每回合恢复 2 生命",       "kind": "def" },
-	"stone":   { "name": "石肤",     "desc": "受到的伤害减少 10%",      "kind": "def" },
-	"greed":   { "name": "贪婪",     "desc": "战斗金币收益 +25%",       "kind": "exp" },
-	"fortune": { "name": "幸运",     "desc": "装备掉落率 +15%",         "kind": "exp" },
-	"haggle":  { "name": "议价",     "desc": "商店折扣 15%",            "kind": "exp" },
+	"crit":      { "name": "精准",  "desc": "暴击率 +10%",                                  "kind": "off" },
+	"critdmg":   { "name": "残忍",  "desc": "暴击伤害 +40%",                                "kind": "off" },
+	"swift":     { "name": "迅捷",  "desc": "15% 概率追加连击",                             "kind": "off" },
+	"pierce":    { "name": "穿透",  "desc": "攻击力 +12%",                                  "kind": "off" },
+	"chain":     { "name": "连锁",  "desc": "攻击对其它敌人溅射 30%",                       "kind": "off" },
+	"lifesteal": { "name": "吸血",  "desc": "每次命中回复造成伤害 12% 的生命",              "kind": "off" },
+	"stun":      { "name": "震慑",  "desc": "每次命中 12% 概率眩晕敌人 1 回合",             "kind": "off" },
+	"burn":      { "name": "燃焰",  "desc": "每次命中 20% 概率点燃敌人（灼烧 2 回合）",     "kind": "off" },
+	"combo":     { "name": "连环",  "desc": "连击与多段攻击伤害 +25%",                      "kind": "off" },
+	"focus":     { "name": "蓄势",  "desc": "防御时获得 1 层蓄势，下次攻击每层 +30%（最多 3 层）", "kind": "off" },
+	"execute":   { "name": "处决",  "desc": "对生命低于 30% 的敌人伤害 +40%",               "kind": "off" },
+	"block":     { "name": "守护",  "desc": "+10% 概率减半伤害",                            "kind": "def" },
+	"bulwark":   { "name": "壁垒",  "desc": "战斗开始时获得 10 护盾",                       "kind": "def" },
+	"regen":     { "name": "再生",  "desc": "每回合恢复 2 生命",                            "kind": "def" },
+	"stone":     { "name": "石肤",  "desc": "受到的伤害减少 10%",                           "kind": "def" },
+	"shieldm":   { "name": "盾魂",  "desc": "所有护盾获取 +40%",                            "kind": "def" },
+	"thornsp":   { "name": "棘甲",  "desc": "受到攻击时反弹 20% 伤害",                      "kind": "def" },
+	"greed":     { "name": "贪婪",  "desc": "战斗金币收益 +25%",                            "kind": "exp" },
+	"fortune":   { "name": "幸运",  "desc": "装备掉落率 +15%",                              "kind": "exp" },
+	"haggle":    { "name": "议价",  "desc": "商店折扣 15%",                                 "kind": "exp" },
+	"alchemy":   { "name": "药理",  "desc": "药水恢复 +15%，战斗中药水冷却 -1",             "kind": "exp" },
 }
 
-const AFFIX_KEYS = ["crit", "critdmg", "swift", "pierce", "chain", "block", "bulwark", "regen", "stone", "greed", "fortune", "haggle"]
+const AFFIX_KEYS = [
+	"crit", "critdmg", "swift", "pierce", "chain", "lifesteal", "stun", "burn",
+	"combo", "focus", "execute", "block", "bulwark", "regen", "stone", "shieldm",
+	"thornsp", "greed", "fortune", "haggle", "alchemy",
+]
 
 # ---- 装备前缀 ----
 const EQUIP_PREFIXES = ["破旧的", "坚固的", "锋利的", "淬火的", "符文的", "皇家", "远古的", "晨曦", "风暴", "灰烬", "霜冻", "镀金"]
+
+# ---- 套装效果：身上 2/3 件装备同前缀即激活 ----
+# fx 键由 EquipmentModifier._apply_set_fx 解释
+const SET_BONUSES = {
+	"破旧的": { "name": "拾荒者",  "two": { "desc": "战斗金币收益 +20%", "fx": { "gold_pct": 20 } },
+				"three": { "desc": "装备掉落率 +15%", "fx": { "loot_pct": 15 } } },
+	"坚固的": { "name": "磐石",    "two": { "desc": "防御 +20%", "fx": { "def_pct": 20 } },
+				"three": { "desc": "受到的伤害 -10%", "fx": { "dmg_reduction": 10 } } },
+	"锋利的": { "name": "利刃",    "two": { "desc": "攻击 +10%", "fx": { "atk_pct": 10 } },
+				"three": { "desc": "暴击率 +10%", "fx": { "crit": 10 } } },
+	"淬火的": { "name": "淬炼",    "two": { "desc": "最大生命 +15%", "fx": { "hp_pct": 15 } },
+				"three": { "desc": "每回合恢复 4 生命", "fx": { "regen": 4 } } },
+	"符文的": { "name": "符印",    "two": { "desc": "元素效果触发率 +15%", "fx": { "elem_proc": 15 } },
+				"three": { "desc": "元素克制伤害加成翻倍", "fx": { "elem_counter_x2": 1 } } },
+	"皇家":   { "name": "王廷",    "two": { "desc": "攻击与防御 +8%", "fx": { "atk_pct": 8, "def_pct": 8 } },
+				"three": { "desc": "战斗金币收益 +50%", "fx": { "gold_pct": 50 } } },
+	"远古的": { "name": "遗世",    "two": { "desc": "护盾获取 +30%", "fx": { "shield_gain_pct": 30 } },
+				"three": { "desc": "战斗开始时获得 20 护盾", "fx": { "shield_start": 20 } } },
+	"晨曦":   { "name": "黎明",    "two": { "desc": "每场战斗第一回合伤害 +30%", "fx": { "first_turn_pct": 30 } },
+				"three": { "desc": "战斗开始时恢复 15% 生命", "fx": { "battle_heal": 15 } } },
+	"风暴":   { "name": "雷霆",    "two": { "desc": "连击概率 +15%", "fx": { "extra_hit": 15 } },
+				"three": { "desc": "连击与多段伤害 +40%", "fx": { "combo_dmg": 40 } } },
+	"灰烬":   { "name": "余烬",    "two": { "desc": "点燃概率 +20%", "fx": { "burn_chance": 20 } },
+				"three": { "desc": "灼烧伤害翻倍", "fx": { "burn_x2": 1 } } },
+	"霜冻":   { "name": "寒霜",    "two": { "desc": "命中 20% 概率削弱敌人攻击", "fx": { "weaken_chance": 20 } },
+				"three": { "desc": "受到的伤害 -12%", "fx": { "dmg_reduction": 12 } } },
+	"镀金":   { "name": "鎏金",    "two": { "desc": "商店折扣 +15%", "fx": { "discount": 15 } },
+				"three": { "desc": "出售价格 +30%", "fx": { "sell_pct": 30 } } },
+}
+
+# ============================================================
+# 五行元素：金克木 · 木克土 · 土克水 · 水克火 · 火克金
+# 武器元素对敌克制伤害 ×1.3，被克 ×0.8；护甲元素同理影响受击
+# 每种元素附带独特的触发效果（默认 22% 概率，每次命中判定）
+# ============================================================
+const ELEMENTS = {
+	"metal": { "name": "金", "color": Color("#e8c95a"), "beats": "wood",
+		"item_word": "鎏金", "proc_name": "锐金", "proc_desc": "本次伤害无视护盾且 +15%" },
+	"wood":  { "name": "木", "color": Color("#6fce62"), "beats": "earth",
+		"item_word": "青木", "proc_name": "回春", "proc_desc": "回复造成伤害 30% 的生命" },
+	"water": { "name": "水", "color": Color("#5aa7e8"), "beats": "fire",
+		"item_word": "沧水", "proc_name": "缠流", "proc_desc": "敌人攻击 -30%，持续 2 回合" },
+	"fire":  { "name": "火", "color": Color("#ff7a3a"), "beats": "metal",
+		"item_word": "燎火", "proc_name": "引燃", "proc_desc": "点燃敌人，灼烧 2 回合" },
+	"earth": { "name": "土", "color": Color("#c49a6a"), "beats": "water",
+		"item_word": "玄岩", "proc_name": "厚土", "proc_desc": "获得 6 + 防御 点护盾" },
+}
+
+const ELEMENT_KEYS = ["metal", "wood", "water", "fire", "earth"]
+
+# ============================================================
+# 怪物词条：基础怪物自带 innate 能力，再随机组合数个词条
+# 区域/精英/首领/周目越高词条越多 → 大量变种怪物
+# ============================================================
+const MONSTER_AFFIXES = {
+	"armored":  { "name": "坚甲", "desc": "受到的伤害 -25%",                 "color": Color("#9aa4bc") },
+	"piercing": { "name": "穿甲", "desc": "攻击无视你的护盾",               "color": Color("#ff9b8a") },
+	"vampiric": { "name": "嗜血", "desc": "吸取造成伤害的 40% 回复自身",     "color": Color("#d46a9c") },
+	"swift":    { "name": "迅捷", "desc": "每回合行动两次（第二击 60%）",    "color": Color("#8aeb9a") },
+	"thorns":   { "name": "荆棘", "desc": "反弹所受伤害的 20%",             "color": Color("#c49a6a") },
+	"regen":    { "name": "再生", "desc": "每回合恢复 6% 最大生命",          "color": Color("#6fce62") },
+	"berserk":  { "name": "狂暴", "desc": "生命低于一半后攻击 +40%",         "color": Color("#ff5a3a") },
+	"tough":    { "name": "魁梧", "desc": "生命 +50%",                       "color": Color("#5aa7e8") },
+	"mighty":   { "name": "巨力", "desc": "攻击 +30%",                       "color": Color("#f4c454") },
+	"ethereal": { "name": "虚体", "desc": "25% 概率闪避攻击",                "color": Color("#b59cf4") },
+	"shielded": { "name": "结界", "desc": "战斗开始时获得 25% 生命护盾",     "color": Color("#5ab4e8") },
+}
+
+const MONSTER_AFFIX_KEYS = ["armored", "piercing", "vampiric", "swift", "thorns", "regen", "berserk", "tough", "mighty", "ethereal", "shielded"]
 
 # ---- 药水信息 ----
 const POTION_INFO = {
@@ -65,6 +150,7 @@ const POTION_INFO = {
 const BIOMES = [
 	{
 		"name": "翠林密境",
+		"element": "wood",
 		"sky_top": Color("#16301f"), "sky_bottom": Color("#3f6b3a"),
 		"far_color": Color("#274a2c"), "ground_color": Color("#2f5430"),
 		"deco_type": "tree",
@@ -77,6 +163,7 @@ const BIOMES = [
 	},
 	{
 		"name": "灼日荒漠",
+		"element": "earth",
 		"sky_top": Color("#5a3a1e"), "sky_bottom": Color("#c98e4a"),
 		"far_color": Color("#8a5e2c"), "ground_color": Color("#b08246"),
 		"deco_type": "dune",
@@ -89,6 +176,7 @@ const BIOMES = [
 	},
 	{
 		"name": "白雪山岭",
+		"element": "water",
 		"sky_top": Color("#23314d"), "sky_bottom": Color("#7e9cc7"),
 		"far_color": Color("#46598a"), "ground_color": Color("#cfd8ea"),
 		"deco_type": "peak",
@@ -101,6 +189,7 @@ const BIOMES = [
 	},
 	{
 		"name": "灰烬火山",
+		"element": "fire",
 		"sky_top": Color("#2a0d0d"), "sky_bottom": Color("#8a2f17"),
 		"far_color": Color("#5a1c10"), "ground_color": Color("#3a1410"),
 		"deco_type": "peak",
@@ -113,6 +202,7 @@ const BIOMES = [
 	},
 	{
 		"name": "远古遗迹",
+		"element": "metal",
 		"sky_top": Color("#1a1430"), "sky_bottom": Color("#4b3a78"),
 		"far_color": Color("#33285c"), "ground_color": Color("#2c2348"),
 		"deco_type": "pillar",
@@ -126,22 +216,23 @@ const BIOMES = [
 ]
 
 # ---- 敌人类型定义 ----
+# innate: 出生自带的怪物词条（突出特色）；再随机叠加额外词条形成变种
 const ENEMY_TYPES = {
-	"slime":      { "name": "史莱姆",     "sprite": "slime",  "palette": { "p": "#5fbf4a", "d": "#2f6b24", "e": "#163612" },          "hp_mult": 0.90, "atk_mult": 0.85 },
-	"wolf":       { "name": "灰狼",       "sprite": "beast",  "palette": { "p": "#8a8f9c", "d": "#4a4f5c", "e": "#ffd23a" },          "hp_mult": 1.00, "atk_mult": 1.10 },
-	"bandit":     { "name": "强盗",       "sprite": "human",  "palette": { "p": "#7a5a3a", "d": "#4a3520", "e": "#e8e6dc", "a": "#9c2f2f" }, "hp_mult": 1.10, "atk_mult": 1.00 },
-	"scorpion":   { "name": "蝎子",       "sprite": "scorp",  "palette": { "p": "#b3702e", "d": "#6e3f14", "e": "#1c0e04" },          "hp_mult": 0.95, "atk_mult": 1.15 },
-	"mummy":      { "name": "木乃伊",     "sprite": "human",  "palette": { "p": "#cfc4a0", "d": "#8a7e56", "e": "#3ad0ff", "a": "#cfc4a0" }, "hp_mult": 1.25, "atk_mult": 0.90 },
-	"bandit2":    { "name": "沙丘劫匪",   "sprite": "human",  "palette": { "p": "#c9a45e", "d": "#7a5e2c", "e": "#fff",    "a": "#2f6b8a" }, "hp_mult": 1.05, "atk_mult": 1.05 },
-	"yeti":       { "name": "雪人",       "sprite": "golem",  "palette": { "p": "#e8eef8", "d": "#9cb0cc", "e": "#1c2b44" },          "hp_mult": 1.35, "atk_mult": 1.00 },
-	"spirit":     { "name": "冰灵",       "sprite": "ghost",  "palette": { "p": "#9fd6ff", "d": "#4a8ac4", "e": "#0c2b44" },          "hp_mult": 0.80, "atk_mult": 1.20 },
-	"wolf2":      { "name": "霜狼",       "sprite": "beast",  "palette": { "p": "#cfe2f4", "d": "#7e9cc7", "e": "#2bd7ff" },          "hp_mult": 1.00, "atk_mult": 1.15 },
-	"lavablob":   { "name": "熔岩怪",     "sprite": "slime",  "palette": { "p": "#e85a1e", "d": "#8a2508", "e": "#ffe14a" },          "hp_mult": 1.10, "atk_mult": 1.10 },
-	"elemental":  { "name": "火元素",     "sprite": "ghost",  "palette": { "p": "#ff9b3a", "d": "#c44a1e", "e": "#fff1a8" },          "hp_mult": 0.85, "atk_mult": 1.30 },
-	"scorpion2":  { "name": "灰烬蝎",     "sprite": "scorp",  "palette": { "p": "#5a4848", "d": "#2e2222", "e": "#ff5a3a" },          "hp_mult": 1.00, "atk_mult": 1.20 },
-	"construct":  { "name": "构造体",     "sprite": "golem",  "palette": { "p": "#8d93a8", "d": "#4e5468", "e": "#3aff9b" },          "hp_mult": 1.40, "atk_mult": 1.05 },
-	"guardian":   { "name": "守护者",     "sprite": "human",  "palette": { "p": "#6f7d9c", "d": "#3c4860", "e": "#ff4a8a", "a": "#c4b6ff" }, "hp_mult": 1.20, "atk_mult": 1.20 },
-	"spirit2":    { "name": "幽魂",       "sprite": "ghost",  "palette": { "p": "#b59cf4", "d": "#5e4aa0", "e": "#ff4a8a" },          "hp_mult": 0.90, "atk_mult": 1.30 },
+	"slime":      { "name": "史莱姆",     "sprite": "slime",  "palette": { "p": "#5fbf4a", "d": "#2f6b24", "e": "#163612" },          "hp_mult": 0.90, "atk_mult": 0.85, "innate": "" },
+	"wolf":       { "name": "灰狼",       "sprite": "beast",  "palette": { "p": "#8a8f9c", "d": "#4a4f5c", "e": "#ffd23a" },          "hp_mult": 1.00, "atk_mult": 1.10, "innate": "" },
+	"bandit":     { "name": "强盗",       "sprite": "human",  "palette": { "p": "#7a5a3a", "d": "#4a3520", "e": "#e8e6dc", "a": "#9c2f2f" }, "hp_mult": 1.10, "atk_mult": 1.00, "innate": "" },
+	"scorpion":   { "name": "蝎子",       "sprite": "scorp",  "palette": { "p": "#b3702e", "d": "#6e3f14", "e": "#1c0e04" },          "hp_mult": 0.95, "atk_mult": 1.15, "innate": "vampiric" },
+	"mummy":      { "name": "木乃伊",     "sprite": "human",  "palette": { "p": "#cfc4a0", "d": "#8a7e56", "e": "#3ad0ff", "a": "#cfc4a0" }, "hp_mult": 1.25, "atk_mult": 0.90, "innate": "regen" },
+	"bandit2":    { "name": "沙丘劫匪",   "sprite": "human",  "palette": { "p": "#c9a45e", "d": "#7a5e2c", "e": "#fff",    "a": "#2f6b8a" }, "hp_mult": 1.05, "atk_mult": 1.05, "innate": "swift" },
+	"yeti":       { "name": "雪人",       "sprite": "golem",  "palette": { "p": "#e8eef8", "d": "#9cb0cc", "e": "#1c2b44" },          "hp_mult": 1.35, "atk_mult": 1.00, "innate": "tough" },
+	"spirit":     { "name": "冰灵",       "sprite": "ghost",  "palette": { "p": "#9fd6ff", "d": "#4a8ac4", "e": "#0c2b44" },          "hp_mult": 0.80, "atk_mult": 1.20, "innate": "ethereal" },
+	"wolf2":      { "name": "霜狼",       "sprite": "beast",  "palette": { "p": "#cfe2f4", "d": "#7e9cc7", "e": "#2bd7ff" },          "hp_mult": 1.00, "atk_mult": 1.15, "innate": "swift" },
+	"lavablob":   { "name": "熔岩怪",     "sprite": "slime",  "palette": { "p": "#e85a1e", "d": "#8a2508", "e": "#ffe14a" },          "hp_mult": 1.10, "atk_mult": 1.10, "innate": "thorns" },
+	"elemental":  { "name": "火元素",     "sprite": "ghost",  "palette": { "p": "#ff9b3a", "d": "#c44a1e", "e": "#fff1a8" },          "hp_mult": 0.85, "atk_mult": 1.30, "innate": "berserk" },
+	"scorpion2":  { "name": "灰烬蝎",     "sprite": "scorp",  "palette": { "p": "#5a4848", "d": "#2e2222", "e": "#ff5a3a" },          "hp_mult": 1.00, "atk_mult": 1.20, "innate": "vampiric" },
+	"construct":  { "name": "构造体",     "sprite": "golem",  "palette": { "p": "#8d93a8", "d": "#4e5468", "e": "#3aff9b" },          "hp_mult": 1.40, "atk_mult": 1.05, "innate": "armored" },
+	"guardian":   { "name": "守护者",     "sprite": "human",  "palette": { "p": "#6f7d9c", "d": "#3c4860", "e": "#ff4a8a", "a": "#c4b6ff" }, "hp_mult": 1.20, "atk_mult": 1.20, "innate": "shielded" },
+	"spirit2":    { "name": "幽魂",       "sprite": "ghost",  "palette": { "p": "#b59cf4", "d": "#5e4aa0", "e": "#ff4a8a" },          "hp_mult": 0.90, "atk_mult": 1.30, "innate": "piercing" },
 }
 
 # ---- 节点类型 ----
@@ -188,6 +279,8 @@ const COMBAT = {
 	"skill_shield_def_mult": 1.2,
 	"skill_dmg_mult": 1.35,
 	"skill_cooldown": 3,
+	"defend_cooldown": 2,      # 防御冷却：不能无脑堆护盾
+	"potion_cooldown": 3,      # 战斗内药水冷却
 	"def_dmg_reduction": 0.8,
 	"upgrade_stat_mult": 0.12,
 	"upgrade_cost_base": 22,
@@ -196,6 +289,27 @@ const COMBAT = {
 	"extra_hit_dmg_mult": 0.8,
 	"enemy_count_normal": { "1": 0.40, "2": 0.45, "3": 0.15 },
 	"sell_refund_pct": 0.50,
+	# 武器职业差异：斧高伤但攻击有冷却 / 剑无冷却 / 弓低伤双段（多段触发命中特效）
+	"axe_dmg_mult": 1.55,
+	"axe_cooldown": 1,
+	"bow_hits": 2,
+	"bow_hit_mult": 0.62,
+	# 五行克制
+	"elem_counter_mult": 1.30,
+	"elem_resist_mult": 0.80,
+	"elem_proc_chance": 22.0,
+	"burn_turns": 2,
+	"burn_atk_pct": 0.25,      # 灼烧每回合伤害 = 玩家攻击 × 25%
+	"weaken_pct": 0.30,        # 缠流/削弱：敌人攻击降低比例
+	# 无限周目：每个强化周目的成长系数
+	"cycle_hp_mult": 0.55,
+	"cycle_atk_mult": 0.45,
+	"cycle_gold_mult": 0.35,
+	# 熔炼与锻打
+	"forge_cost_base": 60,
+	"forge_cost_region": 30,
+	"max_affix_total": 4,      # 锻打后单件装备词条上限
+	"essence_cap": 6,
 }
 
 # ---- 掉落概率（按怪物级别区分）----
@@ -421,3 +535,31 @@ static func get_event(key: String) -> Dictionary:
 		if ev.key == key:
 			return ev
 	return EVENT_POOL[0]
+
+# ---- 五行辅助 ----
+static func element_name(key: String) -> String:
+	return ELEMENTS.get(key, {}).get("name", "?")
+
+static func element_color(key: String) -> Color:
+	return ELEMENTS.get(key, {}).get("color", Color.WHITE)
+
+## 攻方元素对守方元素的伤害系数
+static func element_mult(attacker: String, defender: String) -> float:
+	if attacker == "" or defender == "":
+		return 1.0
+	var a = ELEMENTS.get(attacker, {})
+	if a.get("beats", "") == defender:
+		return COMBAT["elem_counter_mult"]
+	var d = ELEMENTS.get(defender, {})
+	if d.get("beats", "") == attacker:
+		return COMBAT["elem_resist_mult"]
+	return 1.0
+
+static func get_monster_affix(key: String) -> Dictionary:
+	return MONSTER_AFFIXES.get(key, { "name": key, "desc": "", "color": Color.WHITE })
+
+static func monster_affix_names(affixes: Array) -> String:
+	var parts = []
+	for a in affixes:
+		parts.append(get_monster_affix(a).name)
+	return "·".join(parts)

@@ -20,6 +20,7 @@ signal energy_changed(current: int, maximum: int)
 signal enemy_hp_changed(enemy_index: int, current: int, maximum: int)
 signal enemy_shield_changed(enemy_index: int, amount: int)
 signal skill_cooldown_changed(turns: int)
+signal cooldowns_changed
 signal combat_log_message(text: String, message_type: String)
 signal enemy_defeated(enemy_index: int)
 signal boss_phase_changed(phase: int)

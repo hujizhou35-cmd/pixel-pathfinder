@@ -20,6 +20,7 @@ var current_state: int = State.TITLE
 
 # 玩家基础状态
 var region: int = 0
+var cycle: int = 0             # 无限周目：通关 5 区后 +1，怪物与装备数值同步增强
 var gold: int = 0
 var potions: int = 0
 var hp: int = 50
@@ -28,6 +29,9 @@ var energy: int = 10
 var max_energy: int = 10
 var region_buff: float = 0.0
 var bonus_max_hp: int = 0      # 事件带来的永久生命加成（本局有效）
+
+# 熔炼词条精华：[{affix, from}]，锻打可赋予其他装备
+var essences: Array = []
 
 # 装备
 var equipment = {
@@ -120,11 +124,13 @@ func start_new_game(start_region: int = 0) -> void:
 	reset_run_stats()
 	clear_save()
 	region = clampi(start_region, 0, GameData.BIOMES.size() - 1)
+	cycle = 0
 	gold = GameData.PLAYER_BASE["start_gold"]
 	potions = GameData.PLAYER_BASE["start_potions"]
 	region_buff = 0.0
 	bonus_max_hp = 0
 	recent_events.clear()
+	essences.clear()
 	bag.clear()
 
 	# 初始装备
@@ -150,7 +156,7 @@ func start_new_game(start_region: int = 0) -> void:
 func start_region(r: int) -> void:
 	region = r
 	current_node_idx = -1
-	current_map = MapGenerator.generate_map(r)
+	current_map = MapGenerator.generate_map(r, cycle)
 	change_state(State.MAP)
 	_recalc_stats()
 	hp = min(hp, max_hp)
@@ -276,6 +282,72 @@ func sell_bag_item(index: int) -> void:
 	save_game()
 
 # ============================================================
+# 熔炼与锻打
+# 熔炼：销毁背包中史诗+装备，自选萃取其一条词条为「词条精华」
+# 锻打：花费金币把精华赋予任意装备（单件词条上限 4，不可重复）
+# ============================================================
+func get_forge_cost() -> int:
+	return GameData.COMBAT["forge_cost_base"] + region * GameData.COMBAT["forge_cost_region"]
+
+func can_smelt(item: Dictionary) -> bool:
+	return int(item.get("rarity", 0)) >= GameData.Rarity.EPIC and item.get("affixes", []).size() > 0
+
+func smelt_bag_item(index: int, affix_key: String) -> bool:
+	if index < 0 or index >= bag.size():
+		return false
+	var it = bag[index]
+	if not can_smelt(it) or not it.affixes.has(affix_key):
+		return false
+	if essences.size() >= GameData.COMBAT["essence_cap"]:
+		SignalBus.show_toast.emit("精华袋已满（%d/%d）" % [essences.size(), GameData.COMBAT["essence_cap"]])
+		return false
+	essences.append({ "affix": affix_key, "from": str(it.get("name", it.base_name)) })
+	bag.remove_at(index)
+	var ad = GameData.AFFIXES.get(affix_key, {})
+	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.show_toast.emit("熔炼完成：萃取出「%s」词条精华" % ad.get("name", affix_key))
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+## target: {"kind":"equip","slot":...} 或 {"kind":"bag","index":...}
+func forge_essence(essence_idx: int, target: Dictionary) -> bool:
+	if essence_idx < 0 or essence_idx >= essences.size():
+		return false
+	var es = essences[essence_idx]
+	var it = null
+	if target.get("kind", "") == "equip":
+		it = equipment.get(str(target.get("slot", "")))
+	elif target.get("kind", "") == "bag":
+		var bi = int(target.get("index", -1))
+		if bi >= 0 and bi < bag.size():
+			it = bag[bi]
+	if it == null:
+		return false
+	if it.affixes.has(es.affix):
+		SignalBus.show_toast.emit("该装备已拥有此词条")
+		return false
+	if it.affixes.size() >= GameData.COMBAT["max_affix_total"]:
+		SignalBus.show_toast.emit("词条已达上限（%d 条）" % GameData.COMBAT["max_affix_total"])
+		return false
+	var cost = get_forge_cost()
+	if gold < cost:
+		SignalBus.show_toast.emit("金币不足（需要 %d）" % cost)
+		return false
+	gold -= cost
+	it.affixes.append(es.affix)
+	essences.remove_at(essence_idx)
+	var ad = GameData.AFFIXES.get(es.affix, {})
+	_recalc_stats()
+	SignalBus.gold_changed.emit(gold)
+	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.equipment_changed.emit(str(it.get("slot", "weapon")), it)
+	SignalBus.show_toast.emit("锻打成功：「%s」已附着到 %s" % [ad.get("name", es.affix), it.get("name", "装备")])
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+# ============================================================
 # 背包操作
 # ============================================================
 func add_to_bag(item: Dictionary) -> bool:
@@ -288,15 +360,17 @@ func add_to_bag(item: Dictionary) -> bool:
 # ============================================================
 # 药水操作
 # ============================================================
-func use_potion() -> bool:
+## 饮用药水；bonus_pct 为药理词条加成，返回实际恢复量
+func use_potion(bonus_pct: float = 0.0) -> int:
 	if potions <= 0:
-		return false
-	var heal_amount = roundi(max_hp * GameData.COMBAT["potion_heal_pct"])
+		return 0
+	var heal_amount = roundi(max_hp * GameData.COMBAT["potion_heal_pct"] * (1.0 + bonus_pct / 100.0))
+	heal_amount = mini(heal_amount, max_hp - hp)
 	hp = min(hp + heal_amount, max_hp)
 	potions -= 1
 	SignalBus.hp_changed.emit(hp, max_hp)
 	SignalBus.potion_changed.emit(potions)
-	return true
+	return heal_amount
 
 func buy_potion() -> bool:
 	if gold < potion_price or potions >= GameData.PLAYER_BASE["max_potions"]:
@@ -322,18 +396,11 @@ func spend_gold(amount: int) -> bool:
 	return true
 
 # ============================================================
-# 战斗入口
+# 战斗入口（foes 为节点预掷的怪物构成 → 预览即实战）
 # ============================================================
-func enter_combat(elite: bool = false, boss: bool = false) -> void:
+func enter_combat(elite: bool = false, boss: bool = false, foes: Array = []) -> void:
 	change_state(State.COMBAT)
-	var depth = 0
-	if current_map.has("nodes"):
-		for n in current_map.nodes:
-			if n.id == current_node_idx:
-				depth = n.row
-				break
-
-	combat_state = CombatManager.setup_combat(region, depth, elite, boss)
+	combat_state = CombatManager.setup_combat(region, cycle, elite, boss, foes)
 	SignalBus.combat_started.emit(combat_state.enemies)
 	SignalBus.view_changed.emit("combat")
 
@@ -348,13 +415,14 @@ func enter_node(node_data: Dictionary) -> void:
 	node_data.visited = true
 	run_stats.nodes_visited += 1
 
+	var foes: Array = node_data.get("foes", [])
 	match node_data.type:
 		GameData.NodeType.BATTLE:
-			enter_combat(false, false)
+			enter_combat(false, false, foes)
 		GameData.NodeType.ELITE:
-			enter_combat(true, false)
+			enter_combat(true, false, foes)
 		GameData.NodeType.BOSS:
-			enter_combat(false, true)
+			enter_combat(false, true, foes)
 		GameData.NodeType.TREASURE:
 			open_treasure()
 		GameData.NodeType.SHOP:
@@ -384,8 +452,10 @@ func open_shop() -> void:
 	var stats = get_player_stats()
 	var disc = 1.0 - stats.discount / 100.0
 	shop_stock.clear()
-	for i in range(3):
-		var it = EquipmentFactory.generate_item(region, "", -1, "shop")
+	# 5 件随机商品：必含武器/防具/饰品各 1，再补 2 件随机
+	var slots = ["weapon", "armor", "accessory", "", ""]
+	for i in range(slots.size()):
+		var it = EquipmentFactory.generate_item(region, slots[i], -1, "shop")
 		it["price"] = roundi(it.value * 1.6 * disc / 5.0) * 5
 		shop_stock.append(it)
 	potion_price = roundi(30 * (1 + region * 0.2) * disc / 5.0) * 5
@@ -572,17 +642,26 @@ func close_reward() -> void:
 		back_to_map()
 
 # ============================================================
-# 区域/游戏结算
+# 区域/游戏结算（无限周目：通关 5 区进入强化周目，存档保留）
 # ============================================================
 func region_clear() -> void:
 	region_buff = 0.0
 	if region >= GameData.BIOMES.size() - 1:
-		change_state(State.VICTORY)
-		clear_save()
+		# 整轮通关 → 进入下一个强化周目
+		var cleared_cycle = cycle
+		var bonus = 200 + cycle * 120
+		gold += bonus
+		cycle += 1
+		SignalBus.gold_changed.emit(gold)
 		SignalBus.game_victory.emit()
-		SignalBus.show_modal.emit("victory", { "gold": gold, "equipment": equipment.duplicate(true), "stats": run_stats.duplicate() })
+		# 先把新周目第 1 区准备好并保存：此刻退出也不丢进度
+		start_region(0)
+		SignalBus.show_modal.emit("victory", {
+			"gold": gold, "bonus": bonus, "cycle": cleared_cycle,
+			"stats": run_stats.duplicate(),
+		})
 	else:
-		var bonus = 60 + region * 40
+		var bonus = (60 + region * 40) * (1 + cycle)
 		gold += bonus
 		hp = max_hp
 		SignalBus.gold_changed.emit(gold)
@@ -607,7 +686,7 @@ func player_defeated() -> void:
 	hp = max_hp
 	region_buff = 0.0
 	current_node_idx = -1
-	current_map = MapGenerator.generate_map(region)
+	current_map = MapGenerator.generate_map(region, cycle)
 	save_game(true)
 	SignalBus.show_modal.emit("defeat", { "region": region, "lost_gold": lost, "stats": run_stats.duplicate() })
 
@@ -640,17 +719,16 @@ func buy_shop_item(index: int) -> bool:
 	return true
 
 # ============================================================
-# 地图访问
+# 地图访问（自由选关：所有未探索节点随时可进）
 # ============================================================
 func get_reachable_nodes() -> Array:
 	if current_state != State.MAP:
 		return []
-	if current_node_idx < 0:
-		return current_map.get("rows", [[]])[0] if current_map.has("rows") else []
+	var out = []
 	for n in current_map.get("nodes", []):
-		if n.id == current_node_idx:
-			return n.next
-	return []
+		if not n.visited:
+			out.append(n)
+	return out
 
 # ============================================================
 # 设置（当前存档位等）
@@ -720,6 +798,7 @@ func get_slot_info(slot: int) -> Dictionary:
 	var stats = parsed.get("run_stats", {})
 	return {
 		"region": int(parsed.get("region", 0)),
+		"cycle": int(parsed.get("cycle", 0)),
 		"gold": int(parsed.get("gold", 0)),
 		"hp": int(parsed.get("hp", 0)),
 		"kills": int(stats.get("kills", 0)) if stats is Dictionary else 0,
@@ -733,15 +812,17 @@ func save_game(force: bool = false) -> void:
 	if not force and not (current_state in [State.MAP, State.TITLE]):
 		return
 	var data = {
-		"version": 3,
+		"version": 4,
 		"timestamp": Time.get_datetime_string_from_system(false, true),
 		"region": region,
+		"cycle": cycle,
 		"gold": gold,
 		"potions": potions,
 		"hp": hp,
 		"region_buff": region_buff,
 		"bonus_max_hp": bonus_max_hp,
 		"recent_events": recent_events,
+		"essences": essences,
 		"equipment": equipment,
 		"bag": bag,
 		"map_nodes": current_map.get("nodes", []),
@@ -767,6 +848,7 @@ func load_game(slot: int = -1) -> bool:
 		return false
 
 	region = int(parsed.get("region", 0))
+	cycle = int(parsed.get("cycle", 0))
 	gold = int(parsed.get("gold", 0))
 	potions = int(parsed.get("potions", 0))
 	region_buff = float(parsed.get("region_buff", 0.0))
@@ -778,6 +860,10 @@ func load_game(slot: int = -1) -> bool:
 	recent_events.clear()
 	for k in parsed.get("recent_events", []):
 		recent_events.append(str(k))
+	essences.clear()
+	for es in parsed.get("essences", []):
+		if es is Dictionary and es.has("affix"):
+			essences.append({ "affix": str(es.affix), "from": str(es.get("from", "")) })
 
 	equipment = { "weapon": null, "armor": null, "accessory": null }
 	var eq = parsed.get("equipment", {})
@@ -802,9 +888,31 @@ func load_game(slot: int = -1) -> bool:
 				"type": int(n.get("type", 0)),
 				"visited": bool(n.get("visited", false)),
 				"next": [],
+				"foes": [],
 			}
 			for nx in n.get("next", []):
 				node.next.append(int(nx))
+			for foe in n.get("foes", []):
+				if foe is Dictionary:
+					var fa = []
+					for af in foe.get("affixes", []):
+						fa.append(str(af))
+					node.foes.append({
+						"key": str(foe.get("key", "slime")),
+						"elite": bool(foe.get("elite", false)),
+						"boss": bool(foe.get("boss", false)),
+						"affixes": fa,
+						"element": str(foe.get("element", "")),
+					})
+			# 旧版存档没有怪物构成 → 现场补掷
+			if node.foes.is_empty():
+				match node.type:
+					GameData.NodeType.BATTLE:
+						node.foes = CombatManager.roll_foes(region, cycle, false, false)
+					GameData.NodeType.ELITE:
+						node.foes = CombatManager.roll_foes(region, cycle, true, false)
+					GameData.NodeType.BOSS:
+						node.foes = CombatManager.roll_foes(region, cycle, false, true)
 			nodes.append(node)
 	if nodes.is_empty():
 		return false
@@ -819,7 +927,7 @@ func load_game(slot: int = -1) -> bool:
 				row.append(n)
 		row.sort_custom(func(a, b): return a.col < b.col)
 		rows.append(row)
-	current_map = { "rows": rows, "nodes": nodes, "region": region }
+	current_map = { "rows": rows, "nodes": nodes, "region": region, "cycle": cycle }
 
 	_recalc_stats()
 	hp = clampi(int(parsed.get("hp", max_hp)), 1, max_hp)
@@ -839,6 +947,7 @@ func _restore_item(it: Dictionary) -> Dictionary:
 	item["level"] = int(item.get("level", 0))
 	item["value"] = int(item.get("value", 0))
 	item["invested"] = int(item.get("invested", 0))
+	item["grade"] = int(item.get("grade", 1))
 	if item.has("price"):
 		item["price"] = int(item["price"])
 	var st = item.get("stats", {})
@@ -847,6 +956,27 @@ func _restore_item(it: Dictionary) -> Dictionary:
 		"def": int(st.get("def", 0)),
 		"hp": int(st.get("hp", 0)),
 	}
+	# 旧存档物品缺少图鉴/元素信息 → 按物品类型补默认基底
+	if not item.has("catalog_id") or not item.has("element"):
+		var entry = ItemCatalog.default_entry_for_key(str(item.get("key", "sword")))
+		item["catalog_id"] = entry.id
+		item["family"] = entry.base
+		item["grade"] = entry.grade
+		item["element"] = entry.element
+		item["trait"] = entry.trait
+		item["trait_desc"] = entry.trait_desc
+		if not item.has("base_name"):
+			item["base_name"] = entry.name
+	if not item.has("prefix"):
+		item["prefix"] = ""
+		for p in GameData.EQUIP_PREFIXES:
+			if str(item.get("name", "")).begins_with(p):
+				item["prefix"] = p
+				break
+	var affixes = []
+	for a in item.get("affixes", []):
+		affixes.append(str(a))
+	item["affixes"] = affixes
 	# 旧存档没有解说词条 → 现场补一份
 	if not item.has("lore") or not (item["lore"] is Array) or item["lore"].is_empty():
 		item["lore"] = LoreDataScript.compose_item_lore(item)
@@ -872,8 +1002,8 @@ func use_potion_on_map() -> void:
 	if hp >= max_hp:
 		SignalBus.show_toast.emit("生命已满")
 		return
-	var heal = roundi(max_hp * GameData.COMBAT["potion_heal_pct"])
-	use_potion()
+	var stats = get_player_stats()
+	var heal = use_potion(stats.get("potion_bonus_pct", 0))
 	Sfx.play("heal")
 	SignalBus.show_toast.emit("恢复了 %d 点生命" % heal)
 	save_game()

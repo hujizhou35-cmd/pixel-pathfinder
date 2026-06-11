@@ -19,7 +19,7 @@ var _dirty: bool = false
 var _stack: Array = []   # [{type, data}] 被叠加暂存的底层弹窗
 
 ## 可以叠加到其它弹窗之上的"查看类"窗口
-const OVERLAY_TYPES = ["bag", "equip_detail", "help", "codex", "stats"]
+const OVERLAY_TYPES = ["bag", "equip_detail", "help", "codex", "stats", "smelt", "forge"]
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -103,7 +103,7 @@ func is_open() -> bool:
 
 ## ESC 行为：可安全关闭的弹窗才响应
 func try_escape() -> void:
-	if _current_type in OVERLAY_TYPES or _current_type in ["saves", "region_select"]:
+	if _current_type in OVERLAY_TYPES or _current_type in ["saves", "region_select", "node_preview"]:
 		Sfx.play("click")
 		close()
 	elif _current_type == "shop":
@@ -137,6 +137,9 @@ func _rebuild() -> void:
 		"codex":         _build_codex(content)
 		"stats":         _build_stats(content)
 		"region_select": _build_region_select(content)
+		"node_preview":  _build_node_preview(content)
+		"smelt":         _build_smelt(content)
+		"forge":         _build_forge(content)
 		_:               close_all()
 
 	# 居中
@@ -201,12 +204,24 @@ func _item_card(parent: Control, item: Dictionary, compact: bool = false) -> voi
 	v.add_theme_constant_override("separation", 3)
 	card.add_child(v)
 
+	# 图标 + 名称行
+	var head_row = HBoxContainer.new()
+	head_row.add_theme_constant_override("separation", 8)
+	v.add_child(head_row)
+	var icon = TextureRect.new()
+	icon.texture = PixelArt.item_icon(item)
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.stretch_mode = TextureRect.STRETCH_SCALE
+	icon.custom_minimum_size = Vector2(28, 28)
+	icon.size = Vector2(28, 28)
+	head_row.add_child(icon)
 	var nm = Label.new()
 	var lvl_txt = (" +%d" % item.level) if item.level > 0 else ""
 	nm.text = "%s%s · %s" % [item.get("name", item.base_name), lvl_txt, GameData.get_rarity_name(item.rarity)]
 	nm.add_theme_font_size_override("font_size", 18)
 	nm.add_theme_color_override("font_color", rc)
-	v.add_child(nm)
+	nm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head_row.add_child(nm)
 
 	var st = Label.new()
 	st.text = EquipmentModifier.format_item_stats(item)
@@ -241,27 +256,42 @@ func _item_card(parent: Control, item: Dictionary, compact: bool = false) -> voi
 # ------------------------------------------------------------
 func _build_shop(c: VBoxContainer) -> void:
 	_title(c, "旅 行 商 店")
-	_text(c, "金币: %d" % GameState.gold, 16, UITheme.C_GOLD)
+	_text(c, "金币: %d   ·   点击「详情」可查看完整词条与解说" % GameState.gold, 15, UITheme.C_GOLD)
 
 	var stock: Array = GameState.shop_stock
 	if stock.is_empty():
 		_text(c, "货架已空 — 都被你买光了！", 15, UITheme.C_TEXT_DIM)
+
+	var scroll = ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(620, mini(440, stock.size() * 88 + 10))
+	c.add_child(scroll)
+	var inner = VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 8)
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(inner)
+
 	for i in range(stock.size()):
 		var it = stock[i]
 		var row = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
-		c.add_child(row)
+		inner.add_child(row)
 		var cardbox = VBoxContainer.new()
 		cardbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(cardbox)
 		_item_card(cardbox, it, true)
 		var idx = i
-		var buy = _btn(row, "%d 金币" % it.price, func():
+		var bcol = VBoxContainer.new()
+		bcol.add_theme_constant_override("separation", 4)
+		row.add_child(bcol)
+		_btn(bcol, "详情", func():
+			SignalBus.show_modal.emit("equip_detail", { "item": GameState.shop_stock[idx], "price": GameState.shop_stock[idx].price, "shop_index": idx })
+		, 100.0)
+		var buy = _btn(bcol, "%d 金币" % it.price, func():
 			if GameState.buy_shop_item(idx):
 				Sfx.play("coin")
 			else:
 				SignalBus.show_toast.emit("金币不足或背包已满")
-		, 110.0)
+		, 100.0)
 		buy.disabled = GameState.gold < it.price or GameState.bag.size() >= GameData.PLAYER_BASE["bag_capacity"]
 
 	# 药水
@@ -361,6 +391,39 @@ func _build_bag(c: VBoxContainer) -> void:
 			GameState.sell_bag_item(idx)
 			Sfx.play("coin")
 		, 130.0)
+		# 熔炼：史诗+且有词条的装备可萃取词条精华
+		if GameState.can_smelt(it):
+			var sm = _btn(r, "熔炼", func():
+				SignalBus.show_modal.emit("smelt", { "index": idx })
+			, 80.0)
+			sm.tooltip_text = "销毁该装备，自选萃取其一条词条为精华（可锻打到其他装备上）"
+
+	# 词条精华（熔炼所得，可锻打）
+	var ess_lbl = Label.new()
+	ess_lbl.text = "— 词条精华 %d/%d（锻打费用 %d 金）—" % [GameState.essences.size(), GameData.COMBAT["essence_cap"], GameState.get_forge_cost()]
+	ess_lbl.add_theme_color_override("font_color", Color("#e8a8ff"))
+	ess_lbl.add_theme_font_size_override("font_size", 14)
+	inner.add_child(ess_lbl)
+	if GameState.essences.is_empty():
+		_text(inner, "(熔炼史诗或传说装备可获得词条精华)", 13, UITheme.C_TEXT_DIM)
+	for i in range(GameState.essences.size()):
+		var es = GameState.essences[i]
+		var ad = GameData.AFFIXES.get(es.affix, {})
+		var er = HBoxContainer.new()
+		er.add_theme_constant_override("separation", 8)
+		inner.add_child(er)
+		var el = Label.new()
+		el.text = "◈ %s — %s（萃取自 %s）" % [ad.get("name", es.affix), ad.get("desc", ""), es.get("from", "?")]
+		el.add_theme_font_size_override("font_size", 13)
+		el.add_theme_color_override("font_color", Color("#e8a8ff"))
+		el.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		el.custom_minimum_size = Vector2(360, 0)
+		el.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		er.add_child(el)
+		var ei = i
+		_btn(er, "锻打", func():
+			SignalBus.show_modal.emit("forge", { "essence_idx": ei })
+		, 80.0)
 
 	var brow = _btn_row(c)
 	_btn(brow, "关闭 [Esc]", close, 160.0)
@@ -497,15 +560,22 @@ func _build_region_clear(c: VBoxContainer) -> void:
 	, 200.0)
 
 func _build_victory(c: VBoxContainer) -> void:
-	_title(c, "✦ 远 征 完 成 ✦")
-	_text(c, "五大区域全部攻克，传奇就此铸成！", 17)
+	var cleared = int(_current_data.get("cycle", 0))
+	if cleared == 0:
+		_title(c, "✦ 远 征 完 成 ✦")
+		_text(c, "五大区域全部攻克，传奇就此铸成！", 17)
+	else:
+		_title(c, "✦ 强化 %d 周目 完成 ✦" % cleared)
+		_text(c, "更强的怪物也没能拦住你！", 17)
 	_stats_block(c, _current_data.get("stats", {}))
-	_text(c, "最终金币: %d" % _current_data.get("gold", 0), 16, UITheme.C_GOLD)
+	_text(c, "通关奖励 +%d 金币 · 当前金币 %d" % [_current_data.get("bonus", 0), _current_data.get("gold", 0)], 16, UITheme.C_GOLD)
+	_text(c, "远征没有终点 —— 强化 %d 周目已就绪：怪物更强、词条更多，装备掉落也更高级。\n进度已保存，随时可以退出休息。" % (cleared + 1), 14, UITheme.C_TEXT_DIM)
 	var r = _btn_row(c)
-	_btn(r, "再 来 一 局", func():
+	_btn(r, "进入强化 %d 周目" % (cleared + 1), func():
 		close_all()
-		SignalBus.show_modal.emit("region_select", { "in_run": false })
-	, 170.0)
+		Sfx.play("victory")
+		SignalBus.view_changed.emit("map")
+	, 210.0)
 	_btn(r, "返回标题", func():
 		close_all()
 		SignalBus.view_changed.emit("title")
@@ -560,15 +630,17 @@ func _stats_block(c: VBoxContainer, stats: Dictionary) -> void:
 func _build_help(c: VBoxContainer) -> void:
 	_title(c, "冒 险 指 南")
 	var lines = [
-		"◆ 目标：穿越 5 大区域，击败每区首领，完成远征。",
-		"◆ 全部 5 个区域已开放，可任选区域出发（推荐顺序 1→5）。",
-		"◆ 地图：点击发光节点前进 — 战斗/精英/宝箱/商店/事件/首领。",
-		"◆ 战斗：攻击[1] · 盾击[2](伤害+护盾, 3回合冷却) · 防御[3] · 药水[4]。",
-		"◆ 点击敌人可切换攻击目标；敌人血条上有精确数值。",
-		"◆ 装备：+3 解锁被动，+5 解锁独特效果；强化投入出售时返还 50%。",
-		"◆ 掉落：普通怪爆率低，精英必掉稀有+，首领必掉史诗+。",
-		"◆ 阵亡损失一半金币，但装备保留，可在本区域重新出发。",
-		"◆ 进度随时自动保存 — 共 3 个存档位，标题画面可管理。",
+		"◆ 目标：穿越 5 大区域击败首领 — 通关后进入更强的「强化周目」，无限循环。",
+		"◆ 地图自由探索：所有节点随时可进，收集完资源再挑战首领（或直奔首领）。",
+		"◆ 战斗节点可先侦察：怪物数量、词条、精确数值一目了然。",
+		"◆ 战斗：攻击[1] · 盾击[2]（冷却3）· 防御[3]（冷却2）· 药水[4]（冷却3）。",
+		"◆ 武器差异：剑无冷却 / 斧 ×1.55 攻击后冷却1回合 / 弓每回合两箭。",
+		"◆ 五行：金克木·木克土·土克水·水克火·火克金，克制伤害 ×1.3，各有触发效果。",
+		"◆ 怪物有自带能力与随机词条（穿甲/嗜血/迅捷/荆棘…），点击敌人可换目标。",
+		"◆ 装备：同前缀 2/3 件成套装；+3 被动 +5 独特；强化投入出售返还 50%。",
+		"◆ 熔炼：史诗+装备可萃取词条精华，锻打到其他装备上（背包内操作）。",
+		"◆ 掉落：普通怪爆率低，精英必掉稀有+，首领必掉史诗+；周目越高越好。",
+		"◆ 阵亡损失一半金币，装备保留；进度随时自动保存（3 个存档位）。",
 		"◆ 快捷键：B 背包 · C 图鉴 · V 属性 · Esc 关闭窗口。",
 	]
 	for line in lines:
@@ -585,6 +657,22 @@ func _build_equip_detail(c: VBoxContainer) -> void:
 	_title(c, "装 备 详 情")
 	_item_card(c, item)
 	var r = _btn_row(c)
+
+	# 商店详情模式：显示购买按钮
+	if _current_data.has("price"):
+		var price = int(_current_data.price)
+		var sidx = int(_current_data.get("shop_index", -1))
+		var buy = _btn(r, "购买 (%d 金币)" % price, func():
+			if GameState.buy_shop_item(sidx):
+				Sfx.play("coin")
+				close()
+			else:
+				SignalBus.show_toast.emit("金币不足或背包已满")
+		, 180.0)
+		buy.disabled = GameState.gold < price or GameState.bag.size() >= GameData.PLAYER_BASE["bag_capacity"]
+		_btn(r, "返回", close, 120.0)
+		return
+
 	if item.level < GameData.COMBAT["max_upgrade_level"]:
 		var cost = EquipmentModifier.get_upgrade_cost(item, GameState.region)
 		var preview = EquipmentModifier.format_upgrade_preview(item)
@@ -637,7 +725,8 @@ func _build_saves(c: VBoxContainer) -> void:
 			detail.text = "（空存档位）"
 		else:
 			var biome = GameData.get_biome(info.region)
-			detail.text = "区域 %d · %s\n金币 %d · 击杀 %d · %s" % [info.region + 1, biome.name, info.gold, info.kills, info.timestamp]
+			var cyc = ("强化%d周目 · " % int(info.get("cycle", 0))) if int(info.get("cycle", 0)) > 0 else ""
+			detail.text = "%s区域 %d · %s\n金币 %d · 击杀 %d · %s" % [cyc, info.region + 1, biome.name, info.gold, info.kills, info.timestamp]
 		detail.add_theme_font_size_override("font_size", 13)
 		detail.add_theme_color_override("font_color", UITheme.C_TEXT_DIM)
 		info_box.add_child(detail)
@@ -678,7 +767,10 @@ func _build_saves(c: VBoxContainer) -> void:
 func _build_region_select(c: VBoxContainer) -> void:
 	var in_run: bool = _current_data.get("in_run", false)
 	_title(c, "选 择 区 域" if in_run else "开 始 新 远 征")
-	_text(c, "全部 5 个区域已开放，可任选其一进入。\n推荐按 1→5 顺序游玩（难度递增）。", 14, UITheme.C_TEXT_DIM)
+	var tip = "全部 5 个区域已开放，可任选其一进入。\n推荐按 1→5 顺序游玩（难度递增）。"
+	if in_run and GameState.cycle > 0:
+		tip += "\n当前为强化 %d 周目，切区后周目保持不变。" % GameState.cycle
+	_text(c, tip, 14, UITheme.C_TEXT_DIM)
 
 	for i in range(GameData.BIOMES.size()):
 		var ri = i
@@ -752,6 +844,24 @@ func _build_stats(c: VBoxContainer) -> void:
 				l.add_theme_color_override("font_color", UITheme.C_TEXT_DIM)
 			grid.add_child(l)
 
+	# 五行与周目
+	var we = str(total.get("weapon_element", ""))
+	var ae = str(total.get("armor_element", ""))
+	var elem_parts = []
+	if we != "":
+		elem_parts.append("武器五行〔%s〕克%s" % [GameData.element_name(we), GameData.element_name(GameData.ELEMENTS[we].beats)])
+	if ae != "":
+		elem_parts.append("护甲五行〔%s〕" % GameData.element_name(ae))
+	if GameState.cycle > 0:
+		elem_parts.append("强化 %d 周目（怪物 +%d%% 生命/+%d%% 攻击）" % [GameState.cycle, roundi(GameState.cycle * 55.0), roundi(GameState.cycle * 45.0)])
+	if elem_parts.size() > 0:
+		_text(c, " · ".join(elem_parts), 14, Color("#9fd6ff"))
+
+	# 套装
+	var sets: Array = bd.get("sets", [])
+	for s in sets:
+		_text(c, "✪ 套装「%s·%s」(%d件)：%s" % [s.prefix, s.set_name, s.count, " / ".join(s.descs)], 14, UITheme.C_GOLD)
+
 	if bd.buff_atk_pct > 0:
 		_text(c, "✧ 区域祝福：攻击力 +%d%%（已计入总计，离开区域后消失）" % roundi(bd.buff_atk_pct), 14, UITheme.C_GREEN)
 	if GameState.bonus_max_hp > 0:
@@ -790,19 +900,19 @@ func _build_codex(c: VBoxContainer) -> void:
 
 	# 分页按钮
 	var tabs = _btn_row(c)
-	var tab_defs = [["equip", "装备"], ["monster", "怪物"], ["boss", "首领"], ["event", "事件"], ["potion", "药水"]]
+	var tab_defs = [["equip", "装备库"], ["affix", "词条·套装"], ["monster", "怪物"], ["boss", "首领"], ["event", "事件"], ["element", "五行·药水"]]
 	for td in tab_defs:
 		var tkey = td[0]
 		var b = _btn(tabs, td[1], func():
 			_current_data["tab"] = tkey
 			_rebuild()
-		, 96.0)
+		, 100.0)
 		if tkey == tab:
 			b.add_theme_color_override("font_color", UITheme.C_GOLD)
 			b.add_theme_stylebox_override("normal", UITheme.flat_box(Color("#2f3a58"), UITheme.C_GOLD, 2, 8, 6))
 
 	var scroll = ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(620, 420)
+	scroll.custom_minimum_size = Vector2(680, 420)
 	c.add_child(scroll)
 	var v = VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
@@ -811,10 +921,11 @@ func _build_codex(c: VBoxContainer) -> void:
 
 	match tab:
 		"equip":   _codex_equip(v)
+		"affix":   _codex_affix(v)
 		"monster": _codex_monsters(v)
 		"boss":    _codex_bosses(v)
 		"event":   _codex_events(v)
-		"potion":  _codex_potion(v)
+		"element": _codex_element(v)
 
 	var r = _btn_row(c)
 	_btn(r, "关闭 [Esc]", close, 150.0)
@@ -843,35 +954,92 @@ func _codex_line(parent: Control, key: String, text: String, color: Color = UITh
 	parent.add_child(l)
 
 func _codex_equip(v: VBoxContainer) -> void:
-	_codex_line(v, "", "装备分 4 个稀有度：普通 < 稀有 < 史诗 < 传说。稀有度越高属性越强、词条越多、解说越丰富。", UITheme.C_TEXT)
-	var all_templates = [
-		["sword", GameData.WEAPON_TEMPLATES["sword"], "武器"],
-		["bow", GameData.WEAPON_TEMPLATES["bow"], "武器"],
-		["axe", GameData.WEAPON_TEMPLATES["axe"], "武器"],
-		["armor", GameData.ARMOR_TEMPLATES["armor"], "防具"],
-		["amulet", GameData.ACCESSORY_TEMPLATES["amulet"], "饰品"],
-	]
-	for entry in all_templates:
-		var key = entry[0]
-		var t = entry[1]
-		var lore = LoreData.BASE_LORE.get(key, {})
-		var card = _codex_card(v, "%s（%s）" % [t.base_name, entry[2]], UITheme.C_GOLD)
-		_codex_line(card, "来历", lore.get("origin", ""))
-		_codex_line(card, "工艺", lore.get("craft", ""))
-		var passive = "暴击率 +10%" if entry[2] == "武器" else ("格挡率 +10%" if entry[2] == "防具" else "每回合恢复 2 生命")
-		_codex_line(card, "+3 被动", passive, UITheme.C_GREEN)
-		_codex_line(card, "+5 独特", t.unique_5, UITheme.C_GREEN)
+	var entries = ItemCatalog.all_entries()
+	_codex_line(v, "", "装备库共 %d 件：20 个基底 × 金木水火土五行。品级随区域与周目解锁；稀有度（普通<稀有<史诗<传说）决定数值与词条数。" % entries.size(), UITheme.C_TEXT)
+	# 武器职业差异
+	var wc_card = _codex_card(v, "武器职业差异", UITheme.C_GOLD)
+	_codex_line(wc_card, "剑", "标准攻击，无冷却 — 均衡", UITheme.C_GREEN)
+	_codex_line(wc_card, "斧", "伤害 ×1.55，攻击后冷却 1 回合 — 配合蓄势/处决打一击流", UITheme.C_GREEN)
+	_codex_line(wc_card, "弓", "每回合两箭、每箭 ×0.62 且独立触发命中特效 — 配合吸血/震慑/燃焰打连击流", UITheme.C_GREEN)
 
-	var affix_card = _codex_card(v, "词条一览（稀有+1 · 史诗+2 · 传说+3）", Color("#bd6fff"))
-	for ak in GameData.AFFIX_KEYS:
-		var a = GameData.AFFIXES[ak]
-		_codex_line(affix_card, a.name, a.desc)
+	# 按基底分组列出 100 件
+	var last_base = ""
+	var grade_stars = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ", "Ⅴ"]
+	for entry in entries:
+		if entry.base != last_base:
+			last_base = entry.base
+			var sec = Label.new()
+			var trait_txt = ("　·　" + entry.trait_desc) if entry.trait_desc != "" else ""
+			sec.text = "—— %s · %s · 品级%s%s ——" % [entry.base, entry.kind, grade_stars[entry.grade - 1], trait_txt]
+			sec.add_theme_font_size_override("font_size", 15)
+			sec.add_theme_color_override("font_color", UITheme.C_GOLD)
+			v.add_child(sec)
+			var bl = Label.new()
+			bl.text = str(entry.lore[1])
+			bl.add_theme_font_size_override("font_size", 13)
+			bl.add_theme_color_override("font_color", Color("#c8b88a"))
+			bl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			bl.custom_minimum_size = Vector2(620, 0)
+			v.add_child(bl)
+		# 五行变体行：图标 + 名称 + 元素效果
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		v.add_child(row)
+		var icon = TextureRect.new()
+		icon.texture = PixelArt.item_icon({ "family": entry.base, "element": entry.element })
+		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		icon.stretch_mode = TextureRect.STRETCH_SCALE
+		icon.custom_minimum_size = Vector2(24, 24)
+		row.add_child(icon)
+		var ed = GameData.ELEMENTS[entry.element]
+		var nl = Label.new()
+		nl.text = "%s 〔%s〕%s：%s" % [entry.name, ed.name, ed.proc_name, ed.proc_desc]
+		nl.add_theme_font_size_override("font_size", 13)
+		nl.add_theme_color_override("font_color", GameData.element_color(entry.element))
+		nl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(nl)
+
+func _codex_affix(v: VBoxContainer) -> void:
+	_codex_line(v, "", "稀有度词条：稀有 1 条 · 史诗 2 条 · 传说 3 条；熔炼史诗+装备可萃取词条精华，锻打到其他装备（上限 4 条）。", UITheme.C_TEXT)
+	var kinds = { "off": "进攻词条", "def": "防御词条", "exp": "探索词条" }
+	for kind in ["off", "def", "exp"]:
+		var card = _codex_card(v, kinds[kind], Color("#bd6fff"))
+		for ak in GameData.AFFIX_KEYS:
+			var a = GameData.AFFIXES[ak]
+			if a.kind == kind:
+				_codex_line(card, a.name, a.desc)
+	var build_card = _codex_card(v, "流派构筑示例", UITheme.C_GOLD)
+	_codex_line(build_card, "吸血流", "弓（两箭）+ 吸血 + 迅捷 — 多段命中反复回血", UITheme.C_GREEN)
+	_codex_line(build_card, "连击流", "弓 + 迅捷 + 连环 + 震慑 — 高频触发眩晕控场", UITheme.C_GREEN)
+	_codex_line(build_card, "一击流", "斧 + 蓄势 + 处决 + 残忍 — 防御叠层后一斧爆发", UITheme.C_GREEN)
+	_codex_line(build_card, "反伤坦克", "棘甲 + 石肤 + 守护 + 坚固套装 — 站着不动磨死敌人", UITheme.C_GREEN)
+
+	var set_card = _codex_card(v, "套装效果（2/3 件同前缀装备激活）", UITheme.C_GOLD)
+	for p in GameData.EQUIP_PREFIXES:
+		if GameData.SET_BONUSES.has(p):
+			var sb = GameData.SET_BONUSES[p]
+			_codex_line(set_card, "%s·%s" % [p, sb.name], "2件: %s ／ 3件: %s" % [sb.two.desc, sb.three.desc])
+
+func _codex_element(v: VBoxContainer) -> void:
+	_codex_line(v, "", "五行相克：金克木 · 木克土 · 土克水 · 水克火 · 火克金。武器克制敌人时伤害 ×1.3，被克 ×0.8；护甲五行同理影响受击。", UITheme.C_TEXT)
+	for ek in GameData.ELEMENT_KEYS:
+		var ed = GameData.ELEMENTS[ek]
+		var beats = GameData.ELEMENTS[ed.beats]
+		var card = _codex_card(v, "%s（%s）" % [ed.name, ed.item_word], GameData.element_color(ek))
+		_codex_line(card, "克制", "%s（克制时伤害 ×1.3）" % beats.name, UITheme.C_GREEN)
+		_codex_line(card, "触发", "「%s」：%s（每次命中 22%% 概率，可由词条/套装提升）" % [ed.proc_name, ed.proc_desc], Color("#9fd6ff"))
+	_codex_potion(v)
 
 func _codex_monsters(v: VBoxContainer) -> void:
+	_codex_line(v, "", "每种怪物有自带能力，并会随机叠加额外词条形成大量变种（区域/精英/首领/周目越高词条越多）。进入战斗节点前可侦察预览。", UITheme.C_TEXT)
+	var afx_card = _codex_card(v, "怪物词条一览", Color("#e8a8ff"))
+	for ak in GameData.MONSTER_AFFIX_KEYS:
+		var a = GameData.MONSTER_AFFIXES[ak]
+		_codex_line(afx_card, a.name, a.desc)
 	for ri in range(GameData.BIOMES.size()):
 		var biome = GameData.BIOMES[ri]
 		var sec = Label.new()
-		sec.text = "—— 区域 %d · %s ——" % [ri + 1, biome.name]
+		sec.text = "—— 区域 %d · %s（五行属%s）——" % [ri + 1, biome.name, GameData.element_name(str(biome.get("element", "")))]
 		sec.add_theme_font_size_override("font_size", 15)
 		sec.add_theme_color_override("font_color", UITheme.C_GOLD)
 		sec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -879,10 +1047,14 @@ func _codex_monsters(v: VBoxContainer) -> void:
 		for key in biome.enemy_keys:
 			var t = GameData.get_enemy_type(key)
 			var lore = LoreData.get_monster_lore(key)
-			var base_hp = roundi((16.0 + ri * 13.0) * t.hp_mult)
-			var base_atk = roundi((4.0 + ri * 3.0) * t.atk_mult)
+			var base_hp = roundi((20.0 + ri * 16.0) * t.hp_mult)
+			var base_atk = roundi((5.0 + ri * 3.4) * t.atk_mult)
 			var card = _codex_card(v, t.name, UITheme.C_TEXT)
-			_codex_line(card, "数值", "基准生命 %d · 基准攻击 %d（随地图纵深提升；精英为 2 倍生命/1.25 倍攻击）" % [base_hp, base_atk], Color("#9fd6ff"))
+			_codex_line(card, "数值", "基准生命 %d · 基准攻击 %d（精英 ×2.2 生命/×1.3 攻击；每周目再 +55%%/+45%%）" % [base_hp, base_atk], Color("#9fd6ff"))
+			var innate = str(t.get("innate", ""))
+			if innate != "":
+				var ia = GameData.get_monster_affix(innate)
+				_codex_line(card, "自带", "%s — %s" % [ia.name, ia.desc], Color("#e8a8ff"))
 			_codex_line(card, "外观", lore.appearance)
 			_codex_line(card, "性格", lore.personality)
 			_codex_line(card, "来历", lore.origin)
@@ -893,13 +1065,13 @@ func _codex_bosses(v: VBoxContainer) -> void:
 		var biome = GameData.BIOMES[ri]
 		var boss = biome.boss
 		var lore = LoreData.get_boss_lore(ri)
-		var hp_est = roundi((16.0 + ri * 13.0) * 5.2 * 1.4)
-		var atk_est = roundi((4.0 + ri * 3.0) * 1.4 * 1.4)
+		var hp_est = roundi((20.0 + ri * 16.0) * 5.5)
+		var atk_est = roundi((5.0 + ri * 3.4) * 1.5)
 		var card = _codex_card(v, "区域 %d 首领 · %s" % [ri + 1, boss.name], UITheme.C_GOLD)
 		var tnames = []
 		for tr in boss.traits:
 			tnames.append(trait_names.get(tr, tr))
-		_codex_line(card, "数值", "生命约 %d · 攻击约 %d（首领约为普通怪 5 倍生命）" % [hp_est, atk_est], Color("#9fd6ff"))
+		_codex_line(card, "数值", "生命约 %d · 攻击约 %d（另随机附带 2 条怪物词条；每周目再增强）" % [hp_est, atk_est], Color("#9fd6ff"))
 		_codex_line(card, "技能", "、".join(tnames), Color("#ff9b8a"))
 		_codex_line(card, "战法", lore.tactics, Color("#ff9b8a"))
 		_codex_line(card, "外观", lore.appearance)
@@ -918,3 +1090,139 @@ func _codex_potion(v: VBoxContainer) -> void:
 	var card = _codex_card(v, GameData.POTION_INFO.name, Color("#8aeb9a"))
 	_codex_line(card, "效果", GameData.POTION_INFO.desc, UITheme.C_GREEN)
 	_codex_line(card, "来历", GameData.POTION_INFO.lore)
+
+# ------------------------------------------------------------
+# 关卡预览：进入战斗节点前观察怪物数量与状况
+# ------------------------------------------------------------
+func _build_node_preview(c: VBoxContainer) -> void:
+	var node: Dictionary = _current_data.get("node", {})
+	var type_name: String = GameData.NODE_TYPE_NAMES.get(node.get("type", 0), "战斗")
+	_title(c, "侦 察 情 报 · %s" % type_name)
+	var foes: Array = node.get("foes", [])
+	if foes.is_empty():
+		_text(c, "前方情况不明……", 15, UITheme.C_TEXT_DIM)
+	else:
+		_text(c, "前方有 %d 个敌人（数值为实际遭遇值）：" % foes.size(), 15, UITheme.C_TEXT_DIM)
+	for foe in foes:
+		var st = CombatManager.enemy_stats_for(foe, GameState.region, GameState.cycle)
+		var fname: String
+		var head_color = UITheme.C_TEXT
+		if foe.get("boss", false):
+			fname = GameData.get_biome(GameState.region).boss.name
+			head_color = UITheme.C_GOLD
+		else:
+			fname = GameData.get_enemy_type(str(foe.key)).name
+			if foe.get("elite", false):
+				fname = "精英" + fname
+				head_color = Color("#bd6fff")
+		var elem = str(foe.get("element", ""))
+		var card = _codex_card(c, "〔%s〕%s" % [GameData.element_name(elem), fname], head_color)
+		_codex_line(card, "数值", "生命 %d · 攻击 %d" % [st.hp, st.atk], Color("#9fd6ff"))
+		var afx: Array = foe.get("affixes", [])
+		if afx.size() > 0:
+			var parts = []
+			for a in afx:
+				var ad = GameData.get_monster_affix(a)
+				parts.append("%s(%s)" % [ad.name, ad.desc])
+			_codex_line(card, "词条", " · ".join(parts), Color("#e8a8ff"))
+		if foe.get("boss", false):
+			var lore = LoreData.get_boss_lore(GameState.region)
+			_codex_line(card, "战法", lore.tactics, Color("#ff9b8a"))
+		# 五行克制提示
+		var stats = GameState.get_player_stats()
+		var wm = GameData.element_mult(str(stats.get("weapon_element", "")), elem)
+		if wm > 1.0:
+			_codex_line(card, "克制", "你的武器五行克制它（伤害 ×%.1f）" % wm, UITheme.C_GREEN)
+		elif wm < 1.0:
+			_codex_line(card, "克制", "你的武器五行被它克制（伤害 ×%.1f）" % wm, Color("#cf8a6a"))
+	var r = _btn_row(c)
+	_btn(r, "进 入 战 斗", func():
+		close_all()
+		GameState.enter_node(node)
+	, 180.0)
+	_btn(r, "再 想 想", close, 140.0)
+
+# ------------------------------------------------------------
+# 熔炼：选择要萃取的词条
+# ------------------------------------------------------------
+func _build_smelt(c: VBoxContainer) -> void:
+	var idx = int(_current_data.get("index", -1))
+	if idx < 0 or idx >= GameState.bag.size():
+		close()
+		return
+	var it = GameState.bag[idx]
+	_title(c, "熔 炼 装 备", Color("#e8a8ff"))
+	_item_card(c, it, true)
+	_text(c, "装备将被销毁，从下列词条中选择一条萃取为精华：", 14, Color("#cf8a6a"))
+	for a in it.affixes:
+		var ad = GameData.AFFIXES.get(a, {})
+		var ak = a
+		var row = _btn_row(c)
+		_btn(row, "萃取「%s」 — %s" % [ad.get("name", a), ad.get("desc", "")], func():
+			if GameState.smelt_bag_item(idx, ak):
+				close()
+		, 420.0)
+	_text(c, "精华袋 %d/%d" % [GameState.essences.size(), GameData.COMBAT["essence_cap"]], 13, UITheme.C_TEXT_DIM)
+	var r = _btn_row(c)
+	_btn(r, "取消", close, 140.0)
+
+# ------------------------------------------------------------
+# 锻打：把词条精华赋予一件装备
+# ------------------------------------------------------------
+func _build_forge(c: VBoxContainer) -> void:
+	var ei = int(_current_data.get("essence_idx", -1))
+	if ei < 0 or ei >= GameState.essences.size():
+		close()
+		return
+	var es = GameState.essences[ei]
+	var ad = GameData.AFFIXES.get(es.affix, {})
+	_title(c, "锻 打 词 条", Color("#e8a8ff"))
+	_text(c, "精华：「%s」 — %s" % [ad.get("name", es.affix), ad.get("desc", "")], 15, Color("#e8a8ff"))
+	var cost = GameState.get_forge_cost()
+	_text(c, "选择目标装备（花费 %d 金币 · 单件词条上限 %d 条 · 不可重复）：" % [cost, GameData.COMBAT["max_affix_total"]], 14, UITheme.C_TEXT_DIM)
+
+	var scroll = ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(540, 320)
+	c.add_child(scroll)
+	var inner = VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 6)
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(inner)
+
+	var slot_names = { "weapon": "武器", "armor": "护甲", "accessory": "饰品" }
+	for slot in ["weapon", "armor", "accessory"]:
+		var it = GameState.equipment.get(slot)
+		if not it:
+			continue
+		_forge_target_row(inner, it, "已装备·%s" % slot_names[slot], es, ei, { "kind": "equip", "slot": slot }, cost)
+	for i in range(GameState.bag.size()):
+		_forge_target_row(inner, GameState.bag[i], "背包", es, ei, { "kind": "bag", "index": i }, cost)
+
+	var r = _btn_row(c)
+	_btn(r, "取消", close, 140.0)
+
+func _forge_target_row(parent: Control, it: Dictionary, tag: String, es: Dictionary, ei: int, target: Dictionary, cost: int) -> void:
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+	var rc = UITheme.rarity_color(it.rarity)
+	var l = Label.new()
+	l.text = "[%s] %s（词条 %d/%d）" % [tag, it.get("name", it.base_name), it.affixes.size(), GameData.COMBAT["max_affix_total"]]
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", rc)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(340, 0)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(l)
+	var ok = not it.affixes.has(es.affix) and it.affixes.size() < GameData.COMBAT["max_affix_total"] and GameState.gold >= cost
+	var b = _btn(row, "锻打", func():
+		if GameState.forge_essence(ei, target):
+			close()
+	, 90.0)
+	b.disabled = not ok
+	if it.affixes.has(es.affix):
+		b.tooltip_text = "已拥有该词条"
+	elif it.affixes.size() >= GameData.COMBAT["max_affix_total"]:
+		b.tooltip_text = "词条已达上限"
+	elif GameState.gold < cost:
+		b.tooltip_text = "金币不足"

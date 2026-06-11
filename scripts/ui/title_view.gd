@@ -10,7 +10,13 @@ var _subtitle: Label
 var _btn_continue: Button
 var _slot_label: Label
 var _hero_rect: TextureRect
+var _hero_atlas: AtlasTexture
 var _t: float = 0.0
+
+func _refresh_hero_portrait() -> void:
+	var tex = PixelArt.hero_texture(GameState.equipment)
+	_hero_atlas.atlas = tex
+	_hero_atlas.region = Rect2(0, 0, tex.get_width(), tex.get_height() / 4.0)
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -44,20 +50,17 @@ func _ready() -> void:
 	_subtitle.size = Vector2(1280, 30)
 	add_child(_subtitle)
 
-	# 主角立绘
-	var hero_tex = load("res://assets/sprites/hero.png")
-	if hero_tex:
-		var atlas = AtlasTexture.new()
-		atlas.atlas = hero_tex
-		atlas.region = Rect2(0, 0, hero_tex.get_width(), hero_tex.get_height() / 4.0)
-		_hero_rect = TextureRect.new()
-		_hero_rect.texture = atlas
-		_hero_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		_hero_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		_hero_rect.position = Vector2(556, 252)
-		_hero_rect.size = Vector2(168, 180)
-		_hero_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(_hero_rect)
+	# 主角立绘（程序化合成，读档后随装备变化）
+	_hero_atlas = AtlasTexture.new()
+	_hero_rect = TextureRect.new()
+	_hero_rect.texture = _hero_atlas
+	_hero_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_hero_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_hero_rect.position = Vector2(556, 252)
+	_hero_rect.size = Vector2(168, 180)
+	_hero_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_hero_rect)
+	_refresh_hero_portrait()
 
 	# 按钮组
 	var vbox = VBoxContainer.new()
@@ -83,7 +86,7 @@ func _ready() -> void:
 	add_child(_slot_label)
 
 	var ver = Label.new()
-	ver.text = "v3.0 · 远征加强版"
+	ver.text = "v4.0 · 无尽远征版"
 	ver.add_theme_font_size_override("font_size", 13)
 	ver.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
 	ver.position = Vector2(1130, 692)
@@ -103,12 +106,14 @@ func _mk_btn(parent: Control, text: String, cb: Callable) -> Button:
 
 func refresh() -> void:
 	_btn_continue.visible = GameState.has_save()
+	_refresh_hero_portrait()
 	var info = GameState.get_slot_info(GameState.save_slot)
 	if info.is_empty():
 		_slot_label.text = "当前存档位 %d（空）" % (GameState.save_slot + 1)
 	else:
-		_slot_label.text = "当前存档位 %d · 区域 %d · %s · 金币 %d" % [
-			GameState.save_slot + 1, info.region + 1,
+		var cyc = ("周目%d · " % (int(info.get("cycle", 0)) + 1)) if int(info.get("cycle", 0)) > 0 else ""
+		_slot_label.text = "当前存档位 %d · %s区域 %d · %s · 金币 %d" % [
+			GameState.save_slot + 1, cyc, info.region + 1,
 			GameData.get_biome(info.region).name, info.gold,
 		]
 

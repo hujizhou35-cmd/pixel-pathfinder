@@ -2,16 +2,21 @@ class_name MapGenerator
 extends RefCounted
 
 # ============================================================
-# 地图生成器 - 生成节点式地图
+# 地图生成器 - 自由选关式地图（元气骑士式）
+# - 所有未探索节点随时可进，打完首领即过区
+#   → 可先收集完资源再挑战首领，也可以直奔首领
+# - 战斗节点在生成时即掷出怪物构成(foes)，进场前可预览
 # ============================================================
 
-static func generate_map(region: int) -> Dictionary:
-	var row_counts = [2, 3, 2, 2, 1]
+const CombatManagerScript = preload("res://scripts/combat/combat_manager.gd")
+
+static func generate_map(region: int, cycle: int = 0) -> Dictionary:
 	var rows = []
 	var all_nodes = []
 	var id = 0
 
-	# 创建节点
+	# 3 行 × 4 个自由节点 + 顶部首领
+	var row_counts = [4, 4, 4, 1]
 	for r in range(row_counts.size()):
 		var row = []
 		for c in range(row_counts[r]):
@@ -22,87 +27,48 @@ static func generate_map(region: int) -> Dictionary:
 				"type": GameData.NodeType.BATTLE,
 				"next": [],
 				"visited": false,
+				"foes": [],
 			}
 			row.append(node)
 			all_nodes.append(node)
 			id += 1
 		rows.append(row)
 
-	# 设置特殊节点
-	rows[4][0].type = GameData.NodeType.BOSS
+	rows[3][0].type = GameData.NodeType.BOSS
 
-	# 随机设置精英和商店
-	var mid_nodes = []
-	for r in range(1, 4):
+	# 分配特殊节点：1 商店 / 1-2 精英 / 2 宝箱 / 3 事件，其余战斗
+	var free_nodes = []
+	for r in range(3):
 		for n in rows[r]:
-			mid_nodes.append(n)
+			free_nodes.append(n)
+	free_nodes.shuffle()
 
-	mid_nodes.shuffle()
-	var elite_set = false
-	var shop_set = false
-	for n in mid_nodes:
-		if n.type == GameData.NodeType.BATTLE:
-			if not elite_set:
-				n.type = GameData.NodeType.ELITE
-				elite_set = true
-			elif not shop_set:
-				n.type = GameData.NodeType.SHOP
-				shop_set = true
-			else:
-				break
+	var elite_count = 2 if (region >= 3 or cycle > 0) else 1
+	var plan = []
+	plan.append(GameData.NodeType.SHOP)
+	for i in range(elite_count):
+		plan.append(GameData.NodeType.ELITE)
+	plan.append(GameData.NodeType.TREASURE)
+	plan.append(GameData.NodeType.TREASURE)
+	plan.append(GameData.NodeType.EVENT)
+	plan.append(GameData.NodeType.EVENT)
+	plan.append(GameData.NodeType.EVENT)
+	for i in range(mini(plan.size(), free_nodes.size())):
+		free_nodes[i].type = plan[i]
 
-	# 随机设置其余节点类型
-	for n in mid_nodes:
-		if n.type != GameData.NodeType.BATTLE:
-			continue
-		var r = randf()
-		if r < 0.50:
-			n.type = GameData.NodeType.BATTLE
-		elif r < 0.72:
-			n.type = GameData.NodeType.EVENT
-		else:
-			n.type = GameData.NodeType.TREASURE
-
-	# 第一行也随机化
-	for n in rows[0]:
-		if randf() < 0.3:
-			n.type = GameData.NodeType.EVENT if randf() < 0.5 else GameData.NodeType.TREASURE
-
-	# 创建连接
-	for r in range(rows.size() - 1):
-		var A = rows[r]
-		var B = rows[r + 1]
-		for a in A:
-			var ax = (a.col + 0.5) / A.size()
-			var sorted_b = B.duplicate()
-			sorted_b.sort_custom(func(u, v):
-				var ux = (u.col + 0.5) / B.size()
-				var vx = (v.col + 0.5) / B.size()
-				return abs(ux - ax) < abs(vx - ax)
-			)
-			a.next.append(sorted_b[0].id)
-			if B.size() > 1 and randf() < 0.55:
-				a.next.append(sorted_b[1].id)
-
-		# 保证覆盖
-		for b in B:
-			var connected = false
-			for aa in A:
-				if aa.next.has(b.id):
-					connected = true
-					break
-			if not connected:
-				var bx = (b.col + 0.5) / B.size()
-				var near = A.duplicate()
-				near.sort_custom(func(u, v):
-					var ux = (u.col + 0.5) / A.size()
-					var vx = (v.col + 0.5) / A.size()
-					return abs(ux - bx) < abs(vx - bx)
-				)
-				near[0].next.append(b.id)
+	# 掷出战斗节点的怪物构成（进场前可预览，预览即实战）
+	for n in all_nodes:
+		match n.type:
+			GameData.NodeType.BATTLE:
+				n.foes = CombatManagerScript.roll_foes(region, cycle, false, false)
+			GameData.NodeType.ELITE:
+				n.foes = CombatManagerScript.roll_foes(region, cycle, true, false)
+			GameData.NodeType.BOSS:
+				n.foes = CombatManagerScript.roll_foes(region, cycle, false, true)
 
 	return {
 		"rows": rows,
 		"nodes": all_nodes,
 		"region": region,
+		"cycle": cycle,
 	}
