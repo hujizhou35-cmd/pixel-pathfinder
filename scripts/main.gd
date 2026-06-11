@@ -33,7 +33,7 @@ var _current_view: String = ""
 const BG_NAMES := ["forest", "desert", "snow", "volcano", "ruins"]
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	get_window().theme = UITheme.build_theme()
 
 	_build_tree()
@@ -43,23 +43,23 @@ func _ready() -> void:
 
 func _build_tree() -> void:
 	shake_root = Control.new()
-	shake_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shake_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shake_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(shake_root)
 
 	background = TextureRect.new()
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	background.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	background.stretch_mode = TextureRect.STRETCH_SCALE
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	shake_root.add_child(background)
 
 	weather = WeatherScript.new()
-	weather.set_anchors_preset(Control.PRESET_FULL_RECT)
+	weather.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shake_root.add_child(weather)
 
 	var view_layer = Control.new()
-	view_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	view_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	shake_root.add_child(view_layer)
 
@@ -209,8 +209,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				if modal_layer.is_open():
 					modal_layer.try_escape()
 			KEY_B:
-				if _current_view in ["map", "combat"] and not modal_layer.is_open():
+				# 弹窗打开时也可叠加查看背包（栈式弹窗，关闭后恢复原窗口）
+				if _current_view in ["map", "combat"]:
 					SignalBus.show_modal.emit("bag", {})
+			KEY_C:
+				SignalBus.show_modal.emit("codex", { "tab": "equip" })
+			KEY_V:
+				if _current_view in ["map", "combat"]:
+					SignalBus.show_modal.emit("stats", {})
 			KEY_1, KEY_KP_1:
 				_combat_key(1)
 			KEY_2, KEY_KP_2:

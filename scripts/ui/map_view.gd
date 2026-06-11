@@ -23,7 +23,7 @@ var _region_label: Label
 var _t: float = 0.0
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	_region_label = Label.new()
@@ -94,7 +94,7 @@ func _make_node_button(node: Dictionary, center: Vector2) -> void:
 		tr.texture = tex
 		tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.set_anchors_preset(Control.PRESET_FULL_RECT)
+		tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		tr.offset_left = 12
 		tr.offset_top = 8
 		tr.offset_right = -12

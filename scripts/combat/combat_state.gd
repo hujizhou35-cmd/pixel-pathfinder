@@ -87,7 +87,10 @@ func player_attack(target_idx: int = -1) -> void:
 	SignalBus.player_attacked.emit(target.index, result.damage, result.is_crit)
 	Sfx.play("crit" if result.is_crit else "attack")
 
-	var msg = "你挥剑斩向 %s，造成 %d 点伤害" % [t.name, result.damage]
+	var weapon = GameState.equipment.get("weapon")
+	var wkey = weapon.get("key", "sword") if weapon else "sword"
+	var verbs = { "sword": "你挥剑斩向", "bow": "你引弓射向", "axe": "你抡斧劈向" }
+	var msg = "%s %s，造成 %d 点伤害" % [verbs.get(wkey, "你攻击了"), t.name, result.damage]
 	if result.is_crit:
 		msg = "会心一击！你对 %s 造成 %d 点伤害" % [t.name, result.damage]
 	SignalBus.combat_log_message.emit(msg, "crit" if result.is_crit else "player")

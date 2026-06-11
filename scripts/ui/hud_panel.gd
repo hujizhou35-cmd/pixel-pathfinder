@@ -22,7 +22,7 @@ var _slot_buttons: Dictionary = {}   # slot -> {btn, icon, lvl, style}
 var _show_equipment: bool = true
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_top_bar()
 	_build_side_panel()
@@ -106,9 +106,26 @@ func _build_top_bar() -> void:
 	# 区域信息
 	_region_lbl = Label.new()
 	_region_lbl.add_theme_font_size_override("font_size", 16)
-	_region_lbl.position = Vector2(700, 13)
-	_region_lbl.size = Vector2(330, 24)
+	_region_lbl.position = Vector2(690, 13)
+	_region_lbl.size = Vector2(250, 24)
 	bar.add_child(_region_lbl)
+
+	# 切换区域（全地图开放）
+	var region_btn = Button.new()
+	region_btn.text = "换区"
+	region_btn.position = Vector2(948, 8)
+	region_btn.custom_minimum_size = Vector2(72, 36)
+	region_btn.size = Vector2(72, 36)
+	region_btn.add_theme_font_size_override("font_size", 14)
+	region_btn.tooltip_text = "全部 5 个区域已开放，可随时切换（地图界面）"
+	region_btn.pressed.connect(func():
+		Sfx.play("click")
+		if GameState.current_state == GameState.State.MAP:
+			SignalBus.show_modal.emit("region_select", { "in_run": true })
+		else:
+			SignalBus.show_toast.emit("只能在地图界面切换区域")
+	)
+	bar.add_child(region_btn)
 
 	# 静音
 	_mute_btn = Button.new()
@@ -144,7 +161,7 @@ func _build_top_bar() -> void:
 func _build_side_panel() -> void:
 	var panel = Panel.new()
 	panel.position = Vector2(1196, 64)
-	panel.size = Vector2(76, 300)
+	panel.size = Vector2(76, 446)
 	panel.name = "SidePanel"
 	add_child(panel)
 
@@ -170,7 +187,7 @@ func _build_side_panel() -> void:
 		var icon = TextureRect.new()
 		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		icon.offset_left = 8
 		icon.offset_top = 8
 		icon.offset_right = -8
@@ -197,12 +214,50 @@ func _build_side_panel() -> void:
 	bag_btn.custom_minimum_size = Vector2(64, 42)
 	bag_btn.size = Vector2(64, 42)
 	bag_btn.add_theme_font_size_override("font_size", 15)
-	bag_btn.tooltip_text = "打开背包 [B]"
+	bag_btn.tooltip_text = "打开背包 [B]（可叠加在其它窗口上查看）"
 	bag_btn.pressed.connect(func():
 		Sfx.play("click")
 		SignalBus.show_modal.emit("bag", {})
 	)
 	panel.add_child(bag_btn)
+
+	var stats_btn = Button.new()
+	stats_btn.text = "属性"
+	stats_btn.position = Vector2(6, 298)
+	stats_btn.custom_minimum_size = Vector2(64, 42)
+	stats_btn.size = Vector2(64, 42)
+	stats_btn.add_theme_font_size_override("font_size", 15)
+	stats_btn.tooltip_text = "查看属性详情 [V]：基础 + 装备 + 祝福 = 总计"
+	stats_btn.pressed.connect(func():
+		Sfx.play("click")
+		SignalBus.show_modal.emit("stats", {})
+	)
+	panel.add_child(stats_btn)
+
+	var codex_btn = Button.new()
+	codex_btn.text = "图鉴"
+	codex_btn.position = Vector2(6, 348)
+	codex_btn.custom_minimum_size = Vector2(64, 42)
+	codex_btn.size = Vector2(64, 42)
+	codex_btn.add_theme_font_size_override("font_size", 15)
+	codex_btn.tooltip_text = "远征图鉴 [C]：装备 · 怪物 · 首领 · 事件 · 药水"
+	codex_btn.pressed.connect(func():
+		Sfx.play("click")
+		SignalBus.show_modal.emit("codex", { "tab": "equip" })
+	)
+	panel.add_child(codex_btn)
+
+	var help_btn = Button.new()
+	help_btn.text = "帮助"
+	help_btn.position = Vector2(6, 398)
+	help_btn.custom_minimum_size = Vector2(64, 42)
+	help_btn.size = Vector2(64, 42)
+	help_btn.add_theme_font_size_override("font_size", 15)
+	help_btn.pressed.connect(func():
+		Sfx.play("click")
+		SignalBus.show_modal.emit("help", {})
+	)
+	panel.add_child(help_btn)
 
 func _icon_rect(name_: String, pos: Vector2, size_px: int) -> TextureRect:
 	var tr = TextureRect.new()
