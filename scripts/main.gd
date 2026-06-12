@@ -225,7 +225,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_combat_key(3)
 			KEY_4, KEY_KP_4:
 				_combat_key(4)
+			KEY_W, KEY_A, KEY_S, KEY_D, KEY_E, \
+			KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, \
+			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+				_map_key(event.keycode)
 
 func _combat_key(idx: int) -> void:
 	if _current_view == "combat" and not modal_layer.is_open():
 		combat_view.handle_key(idx)
+
+func _map_key(keycode: int) -> void:
+	if _current_view == "map" and not modal_layer.is_open():
+		map_view.handle_key(keycode)

@@ -72,9 +72,24 @@ func _run() -> void:
 	await _shot("02_region_select")
 	modal.close_all()
 
-	GameState.start_new_game(0)
+	# 新远征设置：起名 + 天赋点分配
+	SignalBus.show_modal.emit("new_run_setup", { "region": 0, "talents": { "vit": 4, "str": 3, "tough": 2, "agi": 1 } })
+	await _wait(0.4)
+	await _shot("02b_new_run_setup")
+	modal.close_all()
+
+	GameState.start_new_game(0, "图鉴骑士", { "vit": 4, "str": 3, "tough": 2, "agi": 1 })
 	await _wait(0.5)
 	await _shot("03_map")
+
+	# 地图移动：小人走两步（验证路线与高亮）
+	var adj = GameState.get_adjacent_ids()
+	if adj.size() > 0:
+		main_node.map_view.handle_key(KEY_W)
+		await _wait(0.4)
+		main_node.map_view.handle_key(KEY_W)
+		await _wait(0.4)
+		await _shot("03b_map_moved")
 
 	# 关卡预览（侦察）
 	var battle_node = null
@@ -88,9 +103,12 @@ func _run() -> void:
 		await _shot("04_node_preview")
 		modal.close_all()
 
-	# 战斗（重甲 + 巨剑：检查英雄合成外观）
+	# 战斗（六件套：检查英雄合成外观——头盔/裤子/鞋全部上身）
 	GameState.equipment.weapon = _gear("metal_巨剑", GameData.Rarity.EPIC)
 	GameState.equipment.armor = _gear("fire_板甲", GameData.Rarity.LEGENDARY)
+	GameState.equipment.helmet = _gear("metal_龙首盔", GameData.Rarity.EPIC)
+	GameState.equipment.pants = _gear("earth_板甲腿铠", GameData.Rarity.RARE)
+	GameState.equipment.boots = _gear("fire_疾风靴", GameData.Rarity.RARE)
 	GameState.equipment.accessory = _gear("water_秘语契珠", GameData.Rarity.RARE)
 	GameState._recalc_stats()
 	SignalBus.equipment_changed.emit("weapon", GameState.equipment.weapon)
@@ -102,9 +120,10 @@ func _run() -> void:
 	await _shot("06_combat_attack")
 	await _wait(2.2)
 
-	# 换弓 + 轻甲
+	# 换弓 + 轻甲 + 皮帽
 	GameState.equipment.weapon = _gear("wood_长弓", GameData.Rarity.LEGENDARY)
 	GameState.equipment.armor = _gear("earth_皮甲", GameData.Rarity.RARE)
+	GameState.equipment.helmet = _gear("wood_皮帽", GameData.Rarity.COMMON)
 	GameState._recalc_stats()
 	SignalBus.equipment_changed.emit("weapon", GameState.equipment.weapon)
 	await _wait(0.3)
@@ -114,8 +133,10 @@ func _run() -> void:
 	await _shot("07_combat_bow")
 	await _wait(2.2)
 
-	# 奖励 + 背包叠加（含熔炼按钮/精华区）
+	# 奖励 + 背包叠加（含熔炼按钮/精华区/分类页签）
 	GameState.bag.append(EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.EPIC))
+	GameState.bag.append(EquipmentFactory.generate_item(2, "helmet", GameData.Rarity.RARE))
+	GameState.bag.append(EquipmentFactory.generate_item(2, "boots", GameData.Rarity.EPIC))
 	GameState.essences.append({ "affix": "lifesteal", "from": "测试精华" })
 	GameState.pending_drop = EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.LEGENDARY)
 	SignalBus.show_modal.emit("reward", { "gold": 42, "drop": GameState.pending_drop })
@@ -125,10 +146,20 @@ func _run() -> void:
 	await _wait(0.4)
 	await _shot("09_bag_over_reward")
 	modal.close_all()
+	SignalBus.show_modal.emit("bag", { "filter": "clothes" })
+	await _wait(0.4)
+	await _shot("09b_bag_clothes_filter")
+	modal.close_all()
 	GameState.pending_drop = null
 	GameState.change_state(GameState.State.MAP)
 	SignalBus.view_changed.emit("map")
 	await _wait(0.3)
+
+	# 天赋三选一
+	SignalBus.show_modal.emit("perk_choice", { "offers": ["berserker", "bashmaster", "elementalist"] })
+	await _wait(0.4)
+	await _shot("09c_perk_choice")
+	modal.close_all()
 
 	# 图鉴：装备库 100 件 / 怪物 / 五行
 	SignalBus.show_modal.emit("codex", { "tab": "equip" })

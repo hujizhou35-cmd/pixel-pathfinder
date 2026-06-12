@@ -109,6 +109,7 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 	var sprite_key: String
 	var palette: Dictionary
 	var traits = null
+	var style := "normal"
 	if boss:
 		name = biome.boss.name
 		sprite_key = "boss"
@@ -124,6 +125,7 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 		name = ("精英" + template.name) if elite else template.name
 		sprite_key = str(foe.key)
 		palette = template.palette
+		style = str(template.get("style", "normal"))
 
 	var gold_mult = 6.0 if boss else (3.0 if elite else 1.0)
 	var gold_reward = roundi((8.0 + region * 6.0) * gold_mult * (1.0 + cycle * GameData.COMBAT["cycle_gold_mult"]) * randf_range(0.8, 1.2))
@@ -147,6 +149,7 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 		"traits": traits,
 		"affixes": affixes,
 		"element": str(foe.get("element", "")),
+		"style": style,
 		"scale": 7.0 if boss else (5.4 if elite else 4.4),
 		"anim": 0,
 		"hit_flash": 0,
@@ -157,6 +160,8 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 		"burn": 0,
 		"burn_dmg": 0,
 		"berserk_done": false,
+		"acted": false,        # 先后手机制：本回合是否已行动
+		"guard_turn": 0,       # 坚守风格：举盾计数
 	}
 
 ## 建立战斗数据；foes 为空时现场掷一组（事件遭遇战等）
@@ -193,6 +198,8 @@ static func setup_combat(region: int, cycle: int, elite: bool, boss: bool, foes:
 		"is_boss": is_boss,
 		"hero_anim": 0,
 		"busy": false,
+		"bow_combo": 0,          # 弓：暴击叠加的额外连击数（本场战斗有效）
+		"crits_this_action": 0,  # 本次行动的暴击计数
 	}
 
 ## 护盾获取统一入口（盾魂词条/远古套装加成）

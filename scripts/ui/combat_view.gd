@@ -91,6 +91,7 @@ func _ready() -> void:
 	_btn_potion = _mk_action(bar, "药水 [4]", func(): _act("potion"))
 	_btn_potion.tooltip_text = GameData.POTION_INFO.desc
 	_btn_defend.tooltip_text = "获得护盾（冷却 2 回合）；蓄势词条防御时叠层"
+	_btn_skill.tooltip_text = "盾击：造成 ×1.35 伤害并获得护盾（默认后手——敌人先动；剑/疾盾词条/盾击大师可先手）"
 
 	var hint = Label.new()
 	hint.text = "点击敌人选择目标 · 数字键快捷操作 · B 背包 · V 属性 · C 图鉴"
@@ -131,6 +132,8 @@ func _ready() -> void:
 		_refresh_hero_gear()
 		_update_buttons()
 	)
+	SignalBus.elem_proc_triggered.connect(_on_elem_proc)
+	SignalBus.bow_combo_changed.connect(func(_c): _update_buttons())
 
 	_refresh_hero_gear()
 
@@ -151,7 +154,7 @@ func _refresh_hero_gear() -> void:
 	_hero_atlas.atlas = tex
 	_hero_frame_h = tex.get_height() / 4.0
 	_set_hero_frame(0)
-	var hero_scale := 6.0
+	var hero_scale := 4.0
 	_hero.size = Vector2(tex.get_width() * hero_scale, _hero_frame_h * hero_scale)
 	_hero_base_pos = Vector2(HERO_POS.x - _hero.size.x / 2.0, HERO_POS.y - _hero.size.y)
 	_hero.position = _hero_base_pos
@@ -263,10 +266,16 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(name_lbl)
 
-	# 词条标签
+	# 词条 + 战斗风格标签
 	var tag_lbl = Label.new()
 	var afx: Array = e.get("affixes", [])
-	tag_lbl.text = GameData.monster_affix_names(afx) if afx.size() > 0 else ""
+	var tag_parts = []
+	var st_info = GameData.ENEMY_STYLES.get(str(e.get("style", "normal")), {})
+	if str(st_info.get("name", "")) != "":
+		tag_parts.append("〈%s〉" % st_info.name)
+	if afx.size() > 0:
+		tag_parts.append(GameData.monster_affix_names(afx))
+	tag_lbl.text = "".join(tag_parts)
 	tag_lbl.add_theme_font_size_override("font_size", 12)
 	tag_lbl.add_theme_color_override("font_color", Color("#e8a8ff"))
 	tag_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
@@ -276,6 +285,8 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	tag_lbl.size = Vector2(w + 24.0, 16)
 	tag_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var tips = []
+	if str(st_info.get("name", "")) != "":
+		tips.append("%s：%s" % [st_info.name, st_info.get("desc", "")])
 	for a in afx:
 		var ad = GameData.get_monster_affix(a)
 		tips.append("%s：%s" % [ad.name, ad.desc])
@@ -419,6 +430,9 @@ func _update_buttons() -> void:
 	var wkey = weapon.get("key", "sword") if weapon else "sword"
 	var atk_names = { "sword": "挥剑", "bow": "连射", "axe": "劈砍" }
 	var aname: String = atk_names.get(wkey, "攻击")
+	if wkey == "bow":
+		var arrows = int(GameData.COMBAT["bow_hits"]) + int(GameState.combat_state.get("bow_combo", 0))
+		aname = "连射×%d" % arrows
 	_btn_attack.text = ("%s [1]" % aname) if atk_cd <= 0 else ("%s 冷却(%d)" % [aname, atk_cd])
 	_btn_attack.disabled = not can or atk_cd > 0
 	_btn_skill.disabled = not can or cd > 0
@@ -593,6 +607,16 @@ func _on_enemy_acted(enemy_index: int, _action: String) -> void:
 	var tw = create_tween()
 	tw.tween_property(slot.root, "position:x", slot.base_pos.x - 56.0, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(slot.root, "position:x", slot.base_pos.x, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+## 元素触发：在目标头顶弹出触发名（让被动"看得见"）
+func _on_elem_proc(target_idx: int, proc_name: String) -> void:
+	var pos: Vector2
+	if target_idx >= 0 and target_idx < _enemy_slots.size():
+		var slot = _enemy_slots[target_idx]
+		pos = slot.root.position + Vector2(slot.root.size.x / 2.0, -12.0)
+	else:
+		pos = Vector2(920, 380)
+	_spawn_float("「%s」" % proc_name, pos, Color("#7fe8ff"), 22)
 
 func _on_damage_taken(target: String, amount: int) -> void:
 	if target != "player":

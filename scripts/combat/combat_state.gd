@@ -7,8 +7,11 @@ const LootSystem = preload("res://scripts/equipment/loot_system.gd")
 # ============================================================
 # 战斗状态机
 # - 行动冷却：盾击3 / 防御2 / 药水3 / 斧攻击1（不能无脑堆防御）
-# - 武器差异：剑标准无冷却 / 斧 ×1.55 有冷却 / 弓双段独立触发特效
-# - 五行触发：锐金/回春/缠流/引燃/厚土；克制 ×1.3
+# - 武器差异：剑无冷却且盾击先手 / 斧 ×1.55 有冷却 / 弓多段+暴击叠连击
+# - 先后手机制：普攻/防御/药水先手（仅"先手"风格怪抢先）；
+#   盾击后手（全部敌人先动，剑/疾盾词条/盾击大师天赋可免）
+# - 怪物战斗风格：feral 必先手 / guard 周期举盾 / bash 攻击附带护盾
+# - 元素触发：雷击/回春/冰缚/引燃/岩盾；克制 ×1.3
 # - 怪物词条运行时：穿甲/嗜血/迅捷双动/荆棘/再生/狂暴/虚体/眩晕…
 # ============================================================
 
@@ -75,6 +78,34 @@ func _shield_gain(stats: Dictionary, base: float) -> int:
 	return maxi(1, roundi(base * (1.0 + stats.get("shield_gain_pct", 0) / 100.0)))
 
 # ------------------------------------------------------------
+# 先后手机制
+# - 玩家普攻/防御/药水为先手动作：只有"先手(feral)"风格的怪抢先行动
+# - 玩家盾击为后手动作：所有敌人先行动（剑/疾盾词条/盾击大师天赋豁免）
+# ------------------------------------------------------------
+## 在玩家动作前出手的敌人；all_enemies=true 时全部未行动敌人先动
+## 返回 false 表示玩家在先手攻击中倒下（动作中止）
+func _pre_strike(all_enemies: bool) -> bool:
+	var enemies: Array = combat_data.enemies
+	for i in range(enemies.size()):
+		var e = enemies[i]
+		if e.hp <= 0 or e.get("acted", false):
+			continue
+		if all_enemies or str(e.get("style", "normal")) == "feral":
+			if not all_enemies:
+				SignalBus.combat_log_message.emit("%s 身手迅捷，抢先出手！" % e.name, "enemy")
+			SignalBus.enemy_acted.emit(i, "act")
+			e.acted = true
+			_process_enemy_action(e, i)
+			if GameState.hp <= 0:
+				_combat_end(false)
+				return false
+	return true
+
+## 盾击是否先手：剑专属 / 疾盾词条 / 盾击大师天赋
+func _bash_is_fast(stats: Dictionary, wkey: String) -> bool:
+	return wkey == "sword" or bool(stats.get("bash_fast", false))
+
+# ------------------------------------------------------------
 # 玩家行动
 # ------------------------------------------------------------
 func player_attack(target_idx: int = -1) -> void:
@@ -85,6 +116,10 @@ func player_attack(target_idx: int = -1) -> void:
 		return
 	busy = true
 
+	# 先手风格怪抢先行动
+	if not _pre_strike(false):
+		return
+
 	var stats = GameState.get_player_stats()
 	var weapon = GameState.equipment.get("weapon")
 	var wkey = weapon.get("key", "sword") if weapon else "sword"
@@ -93,10 +128,16 @@ func player_attack(target_idx: int = -1) -> void:
 	var per_mult = 1.0
 	match wkey:
 		"bow":
-			hits = GameData.COMBAT["bow_hits"]
+			# 弓：基础箭数 + 本场战斗暴击积累的连击数
+			hits = GameData.COMBAT["bow_hits"] + int(combat_data.get("bow_combo", 0))
 			per_mult = GameData.COMBAT["bow_hit_mult"]
 		"axe":
 			per_mult = GameData.COMBAT["axe_dmg_mult"]
+
+	# 攻转盾词条：伤害打折，攻击后按总伤害获得护盾
+	if stats.get("atk2shield", false):
+		per_mult *= 0.85
+	combat_data["crits_this_action"] = 0
 
 	# 全局增伤：晨曦首回合 / 蓄势爆发 / 长弓首击
 	var base_extra = 1.0
@@ -113,6 +154,7 @@ func player_attack(target_idx: int = -1) -> void:
 	combat_data.first_attack = false
 
 	var first_dmg = 0
+	var total_dmg = 0
 	for h in range(hits):
 		var target = _resolve_target(target_idx)
 		if target.index < 0:
@@ -121,8 +163,27 @@ func player_attack(target_idx: int = -1) -> void:
 		if h > 0:
 			hm *= 1.0 + stats.combo_dmg / 100.0
 		var dealt = _do_hit(target.index, hm, stats, wkey)
+		total_dmg += dealt
 		if h == 0:
 			first_dmg = dealt
+
+	# 弓：本次行动每次暴击 → 本场战斗连击数 +1（有上限）
+	if wkey == "bow":
+		var crits = int(combat_data.get("crits_this_action", 0))
+		if crits > 0:
+			var cap = int(GameData.COMBAT["bow_combo_cap"])
+			var before = int(combat_data.get("bow_combo", 0))
+			combat_data.bow_combo = mini(cap, before + crits)
+			if combat_data.bow_combo > before:
+				SignalBus.combat_log_message.emit("箭无虚发！连击数 +%d（本场战斗每轮 %d 箭）" % [combat_data.bow_combo - before, GameData.COMBAT["bow_hits"] + combat_data.bow_combo], "crit")
+				SignalBus.bow_combo_changed.emit(combat_data.bow_combo)
+
+	# 攻转盾词条：按总伤害 30% 获得护盾
+	if stats.get("atk2shield", false) and total_dmg > 0:
+		var asg = _shield_gain(stats, total_dmg * 0.30)
+		combat_data.shield += asg
+		SignalBus.shield_changed.emit(combat_data.shield)
+		SignalBus.combat_log_message.emit("攻转盾：获得 %d 护盾" % asg, "system")
 
 	# 斧攻击冷却（攻击后下回合不可攻击 → 防御蓄势的节奏）
 	if wkey == "axe":
@@ -183,6 +244,8 @@ func _do_hit(t_idx: int, mult: float, stats: Dictionary, wkey: String) -> int:
 	var result = DamageCalculator.calc_player_hit(stats, e, hit_mult)
 	var dealt = DamageCalculator.apply_damage_to_enemy(e, result.damage, result.is_crit, opts)
 	GameState.run_stats.dmg_dealt += result.damage
+	if result.is_crit:
+		combat_data["crits_this_action"] = int(combat_data.get("crits_this_action", 0)) + 1
 	SignalBus.player_attacked.emit(t_idx, result.damage, result.is_crit)
 	Sfx.play("crit" if result.is_crit else "attack")
 
@@ -191,31 +254,12 @@ func _do_hit(t_idx: int, mult: float, stats: Dictionary, wkey: String) -> int:
 	if result.is_crit:
 		msg = "会心一击！你对 %s 造成 %d 点伤害" % [e.name, result.damage]
 	if result.elem_tag != "":
-		msg += "（五行%s）" % result.elem_tag
+		msg += "（元素%s）" % result.elem_tag
 	SignalBus.combat_log_message.emit(msg, "crit" if result.is_crit else "player")
 
 	# 元素触发效果
-	match proc:
-		"metal":
-			SignalBus.combat_log_message.emit("「锐金」触发：无视护盾，伤害 +15%！", "crit")
-		"wood":
-			var heal = maxi(1, roundi(result.damage * 0.30))
-			if GameState.hp < GameState.max_hp:
-				GameState.hp = mini(GameState.hp + heal, GameState.max_hp)
-				SignalBus.hp_changed.emit(GameState.hp, GameState.max_hp)
-				SignalBus.combat_log_message.emit("「回春」触发：恢复 %d 生命" % heal, "heal")
-		"water":
-			e.weaken = 2
-			SignalBus.combat_log_message.emit("「缠流」触发：%s 攻击 -30%%（2 回合）" % e.name, "system")
-			SignalBus.enemy_hp_changed.emit(t_idx, e.hp, e.maxhp)
-		"fire":
-			_ignite(e, stats, t_idx)
-			SignalBus.combat_log_message.emit("「引燃」触发：%s 燃烧起来了！" % e.name, "crit")
-		"earth":
-			var sg = _shield_gain(stats, 6.0 + stats.def * 0.8)
-			combat_data.shield += sg
-			SignalBus.shield_changed.emit(combat_data.shield)
-			SignalBus.combat_log_message.emit("「厚土」触发：获得 %d 护盾" % sg, "system")
+	if proc != "":
+		_apply_elem_proc(proc, e, t_idx, stats, result.damage)
 
 	# 装备词条触发（每次命中独立判定）
 	if e.hp > 0 and stats.stun_chance > 0 and randf() * 100 < stats.stun_chance:
@@ -245,6 +289,33 @@ func _do_hit(t_idx: int, mult: float, stats: Dictionary, wkey: String) -> int:
 
 	return dealt
 
+## 元素触发效果结算（独立函数：冒烟测试直接调用以验证被动真实生效）
+## proc: 元素 key；dmg: 本次命中造成的伤害（回春/数值参考）
+func _apply_elem_proc(proc: String, e: Dictionary, t_idx: int, stats: Dictionary, dmg: int) -> void:
+	var pname = str(GameData.ELEMENTS.get(proc, {}).get("proc_name", proc))
+	SignalBus.elem_proc_triggered.emit(t_idx, pname)
+	match proc:
+		"metal":
+			SignalBus.combat_log_message.emit("「%s」触发：无视护盾，伤害 +15%%！" % pname, "crit")
+		"wood":
+			var heal = maxi(1, roundi(dmg * 0.30))
+			if GameState.hp < GameState.max_hp:
+				GameState.hp = mini(GameState.hp + heal, GameState.max_hp)
+				SignalBus.hp_changed.emit(GameState.hp, GameState.max_hp)
+				SignalBus.combat_log_message.emit("「%s」触发：恢复 %d 生命" % [pname, heal], "heal")
+		"water":
+			e.weaken = 2
+			SignalBus.combat_log_message.emit("「%s」触发：%s 攻击 -30%%（2 回合）" % [pname, e.name], "system")
+			SignalBus.enemy_hp_changed.emit(t_idx, e.hp, e.maxhp)
+		"fire":
+			_ignite(e, stats, t_idx)
+			SignalBus.combat_log_message.emit("「%s」触发：%s 燃烧起来了！" % [pname, e.name], "crit")
+		"earth":
+			var sg = _shield_gain(stats, 6.0 + stats.def * 0.8)
+			combat_data.shield += sg
+			SignalBus.shield_changed.emit(combat_data.shield)
+			SignalBus.combat_log_message.emit("「%s」触发：获得 %d 护盾" % [pname, sg], "system")
+
 func _ignite(e: Dictionary, stats: Dictionary, idx: int) -> void:
 	e.burn = GameData.COMBAT["burn_turns"]
 	var mult = 2.0 if stats.get("burn_x2", false) else 1.0
@@ -259,22 +330,37 @@ func player_skill(target_idx: int = -1) -> void:
 
 	busy = true
 	var stats = GameState.get_player_stats()
-	var target = _resolve_target(target_idx)
-	if target.index < 0:
-		busy = false
-		return
-
 	var weapon = GameState.equipment.get("weapon")
 	var wkey = weapon.get("key", "sword") if weapon else "sword"
-	_do_hit(target.index, GameData.COMBAT["skill_dmg_mult"], stats, wkey)
-	Sfx.play("skill")
 
-	var shield_amt = _shield_gain(stats, GameData.COMBAT["base_skill_shield"] + stats.def * GameData.COMBAT["skill_shield_def_mult"])
-	combat_data.shield += shield_amt
-	combat_data.skill_cooldown = GameData.COMBAT["skill_cooldown"]
-	SignalBus.shield_changed.emit(combat_data.shield)
-	SignalBus.skill_cooldown_changed.emit(combat_data.skill_cooldown)
-	SignalBus.combat_log_message.emit("盾击余势：获得 %d 点护盾" % shield_amt, "player")
+	# 盾击默认后手：所有敌人先行动（剑 / 疾盾词条 / 盾击大师天赋豁免）
+	var is_fast = _bash_is_fast(stats, wkey)
+	combat_data["last_action_slow"] = not is_fast
+	if not is_fast:
+		SignalBus.combat_log_message.emit("你蓄力盾击（后手）——敌人抢先行动！", "system")
+		if not _pre_strike(true):
+			return
+	else:
+		if not _pre_strike(false):
+			return
+
+	var target = _resolve_target(target_idx)
+	if target.index >= 0:
+		var dmg_mult: float = GameData.COMBAT["skill_dmg_mult"]
+		var shield_base: float = GameData.COMBAT["base_skill_shield"] + stats.def * GameData.COMBAT["skill_shield_def_mult"]
+		# 盾转攻词条：护盾减半 → 伤害 +60%
+		if stats.get("shield2atk", false):
+			dmg_mult *= 1.6
+			shield_base *= 0.5
+		_do_hit(target.index, dmg_mult, stats, wkey)
+		Sfx.play("skill")
+
+		var shield_amt = _shield_gain(stats, shield_base)
+		combat_data.shield += shield_amt
+		combat_data.skill_cooldown = maxi(1, int(GameData.COMBAT["skill_cooldown"]) - int(stats.get("bash_cd_reduce", 0)))
+		SignalBus.shield_changed.emit(combat_data.shield)
+		SignalBus.skill_cooldown_changed.emit(combat_data.skill_cooldown)
+		SignalBus.combat_log_message.emit("盾击余势：获得 %d 点护盾" % shield_amt, "player")
 
 	_kill_check()
 	_queue_next(_end_player_turn, 0.45)
@@ -286,6 +372,8 @@ func player_defend() -> void:
 		SignalBus.show_toast.emit("防御尚在冷却（%d 回合）" % get_cooldown("defend"))
 		return
 	busy = true
+	if not _pre_strike(false):
+		return
 	var stats = GameState.get_player_stats()
 	var shield_amt = _shield_gain(stats, GameData.COMBAT["base_def_shield"] + stats.def * GameData.COMBAT["def_shield_def_mult"])
 	combat_data.shield += shield_amt
@@ -312,6 +400,8 @@ func player_potion() -> void:
 		SignalBus.show_toast.emit("生命已满，无需饮用药水")
 		return
 	busy = true
+	if not _pre_strike(false):
+		return
 	var stats = GameState.get_player_stats()
 	var heal = GameState.use_potion(stats.get("potion_bonus_pct", 0))
 	var cd = GameData.COMBAT["potion_cooldown"] + 1 - int(stats.get("potion_cd_reduce", 0))
@@ -346,7 +436,8 @@ func _enemy_step() -> void:
 	if not _in_combat() or phase != Phase.ENEMY:
 		return
 	var enemies = combat_data.enemies
-	while _enemy_index < _enemy_count_this_turn and enemies[_enemy_index].hp <= 0:
+	# 跳过已死亡与本回合已行动（先手抢攻过）的敌人
+	while _enemy_index < _enemy_count_this_turn and (enemies[_enemy_index].hp <= 0 or enemies[_enemy_index].get("acted", false)):
 		_enemy_index += 1
 	if _enemy_index >= _enemy_count_this_turn:
 		if _check_combat_end():
@@ -356,6 +447,7 @@ func _enemy_step() -> void:
 
 	var e = enemies[_enemy_index]
 	SignalBus.enemy_acted.emit(_enemy_index, "act")
+	e.acted = true
 	_process_enemy_action(e, _enemy_index)
 	_kill_check()
 	if GameState.hp <= 0:
@@ -404,6 +496,17 @@ func _process_enemy_action(e, idx: int) -> void:
 		if _boss_trait_action(e, idx):
 			return
 
+	# 坚守风格：周期性举盾（第 1、4、7…回合防御，跳过攻击）
+	if str(e.get("style", "normal")) == "guard":
+		e.guard_turn = int(e.get("guard_turn", 0)) + 1
+		if (e.guard_turn - 1) % 3 == 0:
+			var gs = maxi(2, roundi(e.maxhp * 0.12))
+			e.shield += gs
+			SignalBus.enemy_shield_changed.emit(idx, e.shield)
+			SignalBus.combat_log_message.emit("%s 举盾坚守，获得 %d 护盾（本回合不攻击）" % [e.name, gs], "enemy")
+			Sfx.play("shield")
+			return
+
 	# 普通攻击（迅捷词条：双动）
 	var stats = GameState.get_player_stats()
 	var acts = 2 if afx.has("swift") else 1
@@ -423,6 +526,13 @@ func _process_enemy_action(e, idx: int) -> void:
 			e.hp = mini(e.maxhp, e.hp + vh)
 			SignalBus.enemy_hp_changed.emit(idx, e.hp, e.maxhp)
 			SignalBus.combat_log_message.emit("%s 嗜血吸取了 %d 生命" % [e.name, vh], "enemy")
+
+	# 盾击风格：攻击同时获得护盾
+	if str(e.get("style", "normal")) == "bash" and e.hp > 0:
+		var bs = maxi(1, roundi(float(e.atk) * 0.6))
+		e.shield += bs
+		SignalBus.enemy_shield_changed.emit(idx, e.shield)
+		SignalBus.combat_log_message.emit("%s 盾击姿态：获得 %d 护盾" % [e.name, bs], "enemy")
 
 	# 削弱回合数衰减
 	if int(e.get("weaken", 0)) > 0:
@@ -476,7 +586,9 @@ func _boss_trait_action(e, idx: int) -> bool:
 			"shield": 0, "is_boss": false, "is_elite": false,
 			"traits": null, "scale": 4.0,
 			"affixes": [], "element": str(biome.get("element", "")),
+			"style": str(template.get("style", "normal")),
 			"stun": 0, "weaken": 0, "burn": 0, "burn_dmg": 0, "berserk_done": false,
+			"acted": true, "guard_turn": 0,
 			"gold_reward": 0, "anim": 0, "hit_flash": 0, "counted": false,
 		}
 		combat_data.enemies.append(summon)
@@ -518,6 +630,10 @@ func _end_round() -> void:
 		if cds[k] > 0:
 			cds[k] -= 1
 	SignalBus.cooldowns_changed.emit()
+
+	# 重置先后手行动标记
+	for e in combat_data.enemies:
+		e.acted = false
 
 	combat_data.player_turn = true
 	busy = false

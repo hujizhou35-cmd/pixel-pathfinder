@@ -66,6 +66,11 @@ static func calc_enemy_damage(enemy_atk: int, stats: Dictionary, enemy_element: 
 
 	var dmg = maxi(1, roundi(raw - stats.def * GameData.COMBAT["def_dmg_reduction"]))
 
+	# 闪避（鞋 +5 独特 / 龙行靴特性）
+	if stats.get("dodge_chance", 0) > 0 and randf() * 100 < stats.dodge_chance:
+		SignalBus.combat_log_message.emit("你侧身闪过了攻击！", "player")
+		return 0
+
 	# 完全格挡
 	if stats.full_block_chance > 0 and randf() * 100 < stats.full_block_chance:
 		SignalBus.combat_log_message.emit("护甲完全格挡了攻击！", "player")

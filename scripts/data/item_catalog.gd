@@ -2,14 +2,15 @@ class_name ItemCatalog
 extends RefCounted
 
 # ============================================================
-# 装备图鉴库：20 个基底 × 5 行元素 = 100 件命名装备
+# 装备图鉴库：35 个基底 × 5 种元素 = 175 件命名装备
 # - 基底决定槽位/武器职业/品级/小特性（短剑轻巧、刺剑暴击、巨斧蛮力…）
-# - 元素决定名称词缀、配色与五行克制/触发效果
+# - 元素决定名称词缀、配色与元素克制/触发效果
 # - 品级随有效区域（区域 + 周目×5）解锁，数值随品级提升
+# - 槽位：武器 / 铠甲 / 头盔 / 裤子 / 鞋 / 配饰
 # ============================================================
 
 # ---- 基底定义 ----
-# key: 武器职业(sword/axe/bow) 或 armor/amulet
+# key: 武器职业(sword/axe/bow) 或 armor/helmet/pants/boots/amulet
 # grade: 品级 1-5；trait: 基底自带的小特性（叠加在词条之上）
 const BASES = [
 	# 武器 · 剑（无冷却，均衡）
@@ -61,6 +62,54 @@ const BASES = [
 	{ "base": "龙鳞甲", "slot": "armor",     "key": "armor", "grade": 5, "kind": "防具",
 	  "trait": { "dmg_reduction": 8 }, "trait_desc": "龙鳞：受到伤害 -8%",
 	  "lore": "鳞片层叠如龙背，没人说得清材料来自锻造还是真正的龙。" },
+	# 头盔
+	{ "base": "皮帽",     "slot": "helmet",    "key": "helmet", "grade": 1, "kind": "护具·头盔",
+	  "trait": {}, "trait_desc": "",
+	  "lore": "鞣皮缝制的软帽，挡不住重锤，但挡得住树枝、碎石和坏天气。" },
+	{ "base": "铁盔",     "slot": "helmet",    "key": "helmet", "grade": 2, "kind": "护具·头盔",
+	  "trait": {}, "trait_desc": "",
+	  "lore": "民兵营的制式半盔，内衬麻布，戴久了会留下一圈压痕。" },
+	{ "base": "战盔",     "slot": "helmet",    "key": "helmet", "grade": 3, "kind": "护具·头盔",
+	  "trait": { "dmg_reduction": 3 }, "trait_desc": "护面：受到伤害 -3%",
+	  "lore": "带护颊的战场头盔，盔顶的凹痕证明它救过前主人一命。" },
+	{ "base": "骑士盔",   "slot": "helmet",    "key": "helmet", "grade": 4, "kind": "护具·头盔",
+	  "trait": { "block_chance": 6 }, "trait_desc": "面甲：格挡率 +6%",
+	  "lore": "全覆面的骑士头盔，放下面甲的瞬间，世界只剩下敌人。" },
+	{ "base": "龙首盔",   "slot": "helmet",    "key": "helmet", "grade": 5, "kind": "护具·头盔",
+	  "trait": { "dmg_reduction": 5, "crit": 4 }, "trait_desc": "龙威：受到伤害 -5%，暴击率 +4%",
+	  "lore": "铸成龙首形状的传说头盔，据说戴上它时能听见远古巨龙的低吼。" },
+	# 裤子
+	{ "base": "布裤",     "slot": "pants",     "key": "pants",  "grade": 1, "kind": "护具·裤子",
+	  "trait": {}, "trait_desc": "",
+	  "lore": "粗麻布裤，膝盖处打着补丁——每个冒险者都是从这条裤子开始的。" },
+	{ "base": "皮裤",     "slot": "pants",     "key": "pants",  "grade": 2, "kind": "护具·裤子",
+	  "trait": {}, "trait_desc": "",
+	  "lore": "猎户的耐磨皮裤，荆棘丛里穿行一天也不会刮破。" },
+	{ "base": "链甲裤",   "slot": "pants",     "key": "pants",  "grade": 3, "kind": "护具·裤子",
+	  "trait": { "hp_pct": 4 }, "trait_desc": "护腿：最大生命 +4%",
+	  "lore": "铁环编织的腿甲，走起路来沙沙作响，像一场小雨。" },
+	{ "base": "板甲腿铠", "slot": "pants",     "key": "pants",  "grade": 4, "kind": "护具·裤子",
+	  "trait": { "def_pct": 8 }, "trait_desc": "钢膝：防御 +8%",
+	  "lore": "整片钢板冲压的腿铠，跪地祈祷时会在石板上磕出火星。" },
+	{ "base": "龙鳞腿甲", "slot": "pants",     "key": "pants",  "grade": 5, "kind": "护具·裤子",
+	  "trait": { "hp_pct": 6, "def_pct": 6 }, "trait_desc": "龙鳞：最大生命 +6%，防御 +6%",
+	  "lore": "鳞片自踝至腰层层相叠，行走时泛起一道流动的微光。" },
+	# 鞋
+	{ "base": "草编鞋",   "slot": "boots",     "key": "boots",  "grade": 1, "kind": "护具·鞋",
+	  "trait": {}, "trait_desc": "",
+	  "lore": "村口老人编的草鞋，轻得像没穿——也确实跟没穿差不多。" },
+	{ "base": "皮靴",     "slot": "boots",     "key": "boots",  "grade": 2, "kind": "护具·鞋",
+	  "trait": {}, "trait_desc": "",
+	  "lore": "高帮牛皮靴，鞋底钉着防滑的铜钉，雨天山路也走得稳。" },
+	{ "base": "铁头靴",   "slot": "boots",     "key": "boots",  "grade": 3, "kind": "护具·鞋",
+	  "trait": { "extra_hit": 6 }, "trait_desc": "踏步：连击概率 +6%",
+	  "lore": "靴尖包着铁皮的军靴，踹门、踹箱子、踹敌人都很顺脚。" },
+	{ "base": "疾风靴",   "slot": "boots",     "key": "boots",  "grade": 4, "kind": "护具·鞋",
+	  "trait": { "extra_hit": 10 }, "trait_desc": "疾风：连击概率 +10%",
+	  "lore": "鞋帮绣着风之纹章，穿上后脚步轻快得连影子都要追不上。" },
+	{ "base": "龙行靴",   "slot": "boots",     "key": "boots",  "grade": 5, "kind": "护具·鞋",
+	  "trait": { "extra_hit": 8, "dodge_chance": 5 }, "trait_desc": "龙行：连击 +8%，闪避 +5%",
+	  "lore": "传说穿上它的人步伐如龙，敌人的攻击只能落在残影上。" },
 	# 饰品
 	{ "base": "木刻护符", "slot": "accessory", "key": "amulet", "grade": 1, "kind": "饰品",
 	  "trait": { "regen": 1 }, "trait_desc": "祈愿：每回合恢复 1 生命",
@@ -81,11 +130,11 @@ const BASES = [
 
 # ---- 元素风味文案 ----
 const ELEMENT_FLAVOR = {
-	"metal": "鎏金锻法赋予它金属的锐意——出手时隐有金石铮鸣，护盾在它面前形同虚设。",
-	"wood":  "青木灵液浸养七七四十九日，生机盎然——伤敌之时，亦能反哺持有者。",
-	"water": "沧水寒纹在表面流转不息——被它触及的敌人会像陷入深水般使不上力。",
-	"fire":  "燎火之心在内部燃烧不熄——命中之处会留下久久不灭的火种。",
-	"earth": "玄岩之髓灌注其中，厚重沉稳——大地会回应它的主人，凝土成盾。",
+	"metal": "雷光在表面游走噼啪作响——出手时挟着雷霆之势，护盾在它面前形同虚设。",
+	"wood":  "森林的生命力在其中流淌不息——伤敌之时，亦能反哺持有者。",
+	"water": "寒冰之纹在表面凝结流转——被它触及的敌人会像冻僵般使不上力。",
+	"fire":  "焰火之心在内部燃烧不熄——命中之处会留下久久不灭的火种。",
+	"earth": "大地之髓灌注其中，厚重沉稳——大地会回应它的主人，凝土成盾。",
 }
 
 # 缓存
@@ -163,7 +212,10 @@ static func grade_mult(grade: int) -> float:
 static func default_entry_for_key(key: String) -> Dictionary:
 	if _entries.is_empty():
 		_build()
-	var base_by_key = { "sword": "长剑", "axe": "战斧", "bow": "长弓", "armor": "锁子甲", "amulet": "银辉徽章" }
+	var base_by_key = {
+		"sword": "长剑", "axe": "战斧", "bow": "长弓", "armor": "锁子甲",
+		"helmet": "战盔", "pants": "链甲裤", "boots": "铁头靴", "amulet": "银辉徽章",
+	}
 	var b = base_by_key.get(key, "长剑")
 	var ek = GameData.ELEMENT_KEYS[randi() % GameData.ELEMENT_KEYS.size()]
 	return get_entry("%s_%s" % [ek, b])

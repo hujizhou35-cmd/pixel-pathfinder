@@ -160,27 +160,27 @@ func _build_top_bar() -> void:
 
 func _build_side_panel() -> void:
 	var panel = Panel.new()
-	panel.position = Vector2(1196, 64)
-	panel.size = Vector2(76, 446)
+	panel.position = Vector2(1196, 60)
+	panel.size = Vector2(76, 600)
 	panel.name = "SidePanel"
 	add_child(panel)
 
-	var slots = ["weapon", "armor", "accessory"]
-	var slot_names = { "weapon": "武器", "armor": "护甲", "accessory": "饰品" }
+	# 六个装备槽位：武器 / 铠甲 / 头盔 / 裤子 / 鞋 / 配饰
+	var slots = GameData.EQUIP_SLOTS
 	for i in range(slots.size()):
 		var slot = slots[i]
 		var b = Button.new()
-		b.position = Vector2(6, 8 + i * 80)
-		b.custom_minimum_size = Vector2(64, 64)
-		b.size = Vector2(64, 64)
-		b.tooltip_text = slot_names[slot]
+		b.position = Vector2(8, 8 + i * 64)
+		b.custom_minimum_size = Vector2(60, 58)
+		b.size = Vector2(60, 58)
+		b.tooltip_text = GameData.slot_name(slot)
 		b.pressed.connect(func():
 			Sfx.play("click")
 			var it = GameState.equipment.get(slot)
 			if it:
 				SignalBus.show_modal.emit("equip_detail", { "slot": slot, "item": it })
 			else:
-				SignalBus.show_toast.emit("该槽位暂无装备")
+				SignalBus.show_toast.emit("「%s」槽位暂无装备" % GameData.slot_name(slot))
 		)
 		panel.add_child(b)
 
@@ -189,18 +189,27 @@ func _build_side_panel() -> void:
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		icon.offset_left = 8
-		icon.offset_top = 8
+		icon.offset_top = 6
 		icon.offset_right = -8
-		icon.offset_bottom = -8
+		icon.offset_bottom = -10
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(icon)
+
+		var slot_tag = Label.new()
+		slot_tag.text = GameData.slot_name(slot)
+		slot_tag.add_theme_font_size_override("font_size", 10)
+		slot_tag.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+		slot_tag.position = Vector2(3, 42)
+		slot_tag.size = Vector2(30, 14)
+		slot_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(slot_tag)
 
 		var lvl = Label.new()
 		lvl.add_theme_font_size_override("font_size", 12)
 		lvl.add_theme_color_override("font_color", UITheme.C_GOLD)
 		lvl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 		lvl.add_theme_constant_override("outline_size", 3)
-		lvl.position = Vector2(36, 44)
+		lvl.position = Vector2(32, 40)
 		lvl.size = Vector2(26, 16)
 		lvl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		lvl.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -208,56 +217,28 @@ func _build_side_panel() -> void:
 
 		_slot_buttons[slot] = { "btn": b, "icon": icon, "lvl": lvl }
 
-	var bag_btn = Button.new()
-	bag_btn.text = "背包"
-	bag_btn.position = Vector2(6, 248)
-	bag_btn.custom_minimum_size = Vector2(64, 42)
-	bag_btn.size = Vector2(64, 42)
-	bag_btn.add_theme_font_size_override("font_size", 15)
-	bag_btn.tooltip_text = "打开背包 [B]（可叠加在其它窗口上查看）"
-	bag_btn.pressed.connect(func():
-		Sfx.play("click")
-		SignalBus.show_modal.emit("bag", {})
-	)
-	panel.add_child(bag_btn)
-
-	var stats_btn = Button.new()
-	stats_btn.text = "属性"
-	stats_btn.position = Vector2(6, 298)
-	stats_btn.custom_minimum_size = Vector2(64, 42)
-	stats_btn.size = Vector2(64, 42)
-	stats_btn.add_theme_font_size_override("font_size", 15)
-	stats_btn.tooltip_text = "查看属性详情 [V]：基础 + 装备 + 祝福 = 总计"
-	stats_btn.pressed.connect(func():
-		Sfx.play("click")
-		SignalBus.show_modal.emit("stats", {})
-	)
-	panel.add_child(stats_btn)
-
-	var codex_btn = Button.new()
-	codex_btn.text = "图鉴"
-	codex_btn.position = Vector2(6, 348)
-	codex_btn.custom_minimum_size = Vector2(64, 42)
-	codex_btn.size = Vector2(64, 42)
-	codex_btn.add_theme_font_size_override("font_size", 15)
-	codex_btn.tooltip_text = "远征图鉴 [C]：装备 · 怪物 · 首领 · 事件 · 药水"
-	codex_btn.pressed.connect(func():
-		Sfx.play("click")
-		SignalBus.show_modal.emit("codex", { "tab": "equip" })
-	)
-	panel.add_child(codex_btn)
-
-	var help_btn = Button.new()
-	help_btn.text = "帮助"
-	help_btn.position = Vector2(6, 398)
-	help_btn.custom_minimum_size = Vector2(64, 42)
-	help_btn.size = Vector2(64, 42)
-	help_btn.add_theme_font_size_override("font_size", 15)
-	help_btn.pressed.connect(func():
-		Sfx.play("click")
-		SignalBus.show_modal.emit("help", {})
-	)
-	panel.add_child(help_btn)
+	var util_defs = [
+		["背包", "打开背包 [B]（32 格 · 分类查看 · 一键整理）", func(): SignalBus.show_modal.emit("bag", {})],
+		["属性", "查看属性详情 [V]：基础 + 装备 + 天赋 = 总计", func(): SignalBus.show_modal.emit("stats", {})],
+		["图鉴", "远征图鉴 [C]：装备 · 词条 · 天赋 · 怪物 · 首领", func(): SignalBus.show_modal.emit("codex", { "tab": "equip" })],
+		["帮助", "", func(): SignalBus.show_modal.emit("help", {})],
+	]
+	for i in range(util_defs.size()):
+		var ud = util_defs[i]
+		var ub = Button.new()
+		ub.text = ud[0]
+		ub.position = Vector2(8, 396 + i * 50)
+		ub.custom_minimum_size = Vector2(60, 42)
+		ub.size = Vector2(60, 42)
+		ub.add_theme_font_size_override("font_size", 15)
+		if str(ud[1]) != "":
+			ub.tooltip_text = ud[1]
+		var cb: Callable = ud[2]
+		ub.pressed.connect(func():
+			Sfx.play("click")
+			cb.call()
+		)
+		panel.add_child(ub)
 
 func _icon_rect(name_: String, pos: Vector2, size_px: int) -> TextureRect:
 	var tr = TextureRect.new()

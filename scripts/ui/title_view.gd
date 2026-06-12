@@ -86,7 +86,7 @@ func _ready() -> void:
 	add_child(_slot_label)
 
 	var ver = Label.new()
-	ver.text = "v4.0 · 无尽远征版"
+	ver.text = "v5.0 · 远征路线版"
 	ver.add_theme_font_size_override("font_size", 13)
 	ver.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
 	ver.position = Vector2(1130, 692)
@@ -112,8 +112,8 @@ func refresh() -> void:
 		_slot_label.text = "当前存档位 %d（空）" % (GameState.save_slot + 1)
 	else:
 		var cyc = ("周目%d · " % (int(info.get("cycle", 0)) + 1)) if int(info.get("cycle", 0)) > 0 else ""
-		_slot_label.text = "当前存档位 %d · %s区域 %d · %s · 金币 %d" % [
-			GameState.save_slot + 1, cyc, info.region + 1,
+		_slot_label.text = "当前存档位 %d · %s · %s区域 %d · %s · 金币 %d" % [
+			GameState.save_slot + 1, str(info.get("hero_name", "冒险者")), cyc, info.region + 1,
 			GameData.get_biome(info.region).name, info.gold,
 		]
 

@@ -23,6 +23,8 @@ signal skill_cooldown_changed(turns: int)
 signal cooldowns_changed
 signal combat_log_message(text: String, message_type: String)
 signal enemy_defeated(enemy_index: int)
+signal elem_proc_triggered(target_idx: int, proc_name: String)
+signal bow_combo_changed(combo: int)
 signal boss_phase_changed(phase: int)
 signal floating_text_spawned(text: String, position: Vector2, color: Color)
 signal shake_screen(intensity: float, duration: float)

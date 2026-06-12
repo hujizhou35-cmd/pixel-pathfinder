@@ -58,12 +58,39 @@ static func _dark(c: Color, f: float = 0.65) -> Color:
 static func _light(c: Color, f: float = 0.35) -> Color:
 	return c.lerp(Color.WHITE, f)
 
+## 描边后处理：给精灵的剪影包一圈深色轮廓（元气骑士式清晰外形）
+## 对单帧图像调用（多帧需逐帧处理后拼合，避免轮廓跨帧渗透）
+static func _apply_outline(img: Image, col: Color = Color("#141828")) -> void:
+	var w = img.get_width()
+	var h = img.get_height()
+	var src = img.duplicate()
+	for y in range(h):
+		for x in range(w):
+			if src.get_pixel(x, y).a > 0.05:
+				continue
+			var edge = false
+			if x > 0 and src.get_pixel(x - 1, y).a > 0.45:
+				edge = true
+			elif x < w - 1 and src.get_pixel(x + 1, y).a > 0.45:
+				edge = true
+			elif y > 0 and src.get_pixel(x, y - 1).a > 0.45:
+				edge = true
+			elif y < h - 1 and src.get_pixel(x, y + 1).a > 0.45:
+				edge = true
+			if edge:
+				img.set_pixel(x, y, col)
+
 # ============================================================
-# 英雄：整体外观随装备变化
-# 帧布局：0 待机A / 1 待机B / 2 攻击 / 3 受伤，竖排 22×26 ×4
+# 英雄：整体外观随六件装备变化（装备展示型写实比例重绘）
+# 帧布局：0 待机A / 1 待机B / 2 攻击 / 3 受伤，竖排 40×52 ×4
+# 美术原则：写实头身比（头约 1/4.5，像盔甲展架一样突出装备）、
+#           每件装备有真实的结构设计（盔形/甲片/束带/鞋型）、
+#           整体深色描边、统一左上光源、暗部色相偏冷
 # ============================================================
-const HERO_W := 22
-const HERO_H := 26
+const HERO_W := 40
+const HERO_H := 52
+
+const OUTLINE := Color("#141828")     # 轮廓（冷色深）
 
 static func hero_frame_size() -> Vector2:
 	return Vector2(HERO_W, HERO_H)
@@ -71,15 +98,23 @@ static func hero_frame_size() -> Vector2:
 static func hero_texture(equipment: Dictionary) -> ImageTexture:
 	var weapon = equipment.get("weapon")
 	var armor = equipment.get("armor")
+	var helmet = equipment.get("helmet")
+	var pants = equipment.get("pants")
+	var boots = equipment.get("boots")
 	var acc = equipment.get("accessory")
-	var key = "hero|%s|%s|%s" % [
-		_gear_sig(weapon), _gear_sig(armor), _gear_sig(acc),
+	var key = "hero|%s|%s|%s|%s|%s|%s" % [
+		_gear_sig(weapon), _gear_sig(armor), _gear_sig(helmet),
+		_gear_sig(pants), _gear_sig(boots), _gear_sig(acc),
 	]
 	if _cache.has(key):
 		return _cache[key]
 	var img = _img(HERO_W, HERO_H * 4)
 	for f in range(4):
-		_draw_hero_frame(img, f * HERO_H, f, weapon, armor, acc)
+		# 逐帧绘制 → 描边 → 拼合（避免轮廓跨帧渗透）
+		var frame = _img(HERO_W, HERO_H)
+		_draw_hero_frame(frame, 0, f, equipment)
+		_apply_outline(frame, OUTLINE)
+		img.blit_rect(frame, Rect2i(0, 0, HERO_W, HERO_H), Vector2i(0, f * HERO_H))
 	var t = _tex(img)
 	_cache[key] = t
 	return t
@@ -89,169 +124,474 @@ static func _gear_sig(it) -> String:
 		return "-"
 	return "%s/%s/%d/%d" % [str(it.get("family", it.get("key", ""))), str(it.get("element", "")), int(it.get("rarity", 0)), int(it.get("grade", 1))]
 
-static func _draw_hero_frame(img: Image, oy: int, frame: int, weapon, armor, acc) -> void:
+## 装备主色：元素配色与铁灰混合，稀有度越高越鲜亮
+static func _gear_main(it, fallback: Color) -> Color:
+	if it == null:
+		return fallback
+	var pal = ELEM_PAL.get(str(it.get("element", "")), ELEM_PAL[""])
+	var mix = 0.40 + 0.06 * int(it.get("rarity", 0))
+	return Color("#8d93a8").lerp(_c(pal.p), mix)
+
+static func _draw_hero_frame(img: Image, oy: int, frame: int, eq: Dictionary) -> void:
+	var weapon = eq.get("weapon")
+	var armor = eq.get("armor")
+	var helmet = eq.get("helmet")
+	var pants_it = eq.get("pants")
+	var boots_it = eq.get("boots")
+	var acc = eq.get("accessory")
+
 	var bob = 1 if frame == 1 else 0
 	var lean = 1 if frame == 2 else (-1 if frame == 3 else 0)
 
-	var skin = Color("#e8b88a")
-	var skin_d = Color("#b8845a")
-	var hair = Color("#5a3a22")
-	var pants = Color("#2c3350")
-	var boots = Color("#1c2236")
+	var skin = Color("#f2c08a")
+	var skin_hi = Color("#fbd9ac")
+	var skin_d = Color("#c88a58")
+	var hair = Color("#6a4427")
+	var hair_hi = Color("#8a5e38")
 
-	# 护甲样式
-	var afam = str(armor.get("family", "")) if armor else ""
-	var agrade = int(armor.get("grade", 1)) if armor else 0
-	var aelem = str(armor.get("element", "")) if armor else ""
-	var arar = int(armor.get("rarity", 0)) if armor else 0
-	var epal = ELEM_PAL.get(aelem, ELEM_PAL[""])
-	var cloth = Color("#7a6a4e")          # 无甲布衣
-	var amain: Color = cloth if armor == null else _c(epal.p).lerp(Color("#8d93a8"), 0.45)
+	# 各部位主色
+	var cloth = Color("#8a7654")
+	var amain: Color = _gear_main(armor, cloth)
 	var adark: Color = _dark(amain)
-	var trim: Color = GameData.get_rarity_color(arar) if armor else Color("#5a6278")
+	var ahi: Color = _light(amain, 0.3)
+	var trim: Color = GameData.get_rarity_color(int(armor.get("rarity", 0))) if armor else Color("#5a6278")
+	var pmain: Color = _gear_main(pants_it, Color("#34406a"))
+	var pdark: Color = _dark(pmain)
+	var bmain: Color = _gear_main(boots_it, Color("#2a3146"))
+	var bdark: Color = _dark(bmain, 0.55)
+	var gold = Color("#f2cf5e")
+	var steel_hi = Color("#d8e0f0")
 
-	var cx = 8 + lean      # 躯干左缘
-	var ty = oy + 9 + bob  # 躯干顶部
+	var afam = str(armor.get("family", "")) if armor else ""
+	var hfam = str(helmet.get("family", "")) if helmet else ""
+	var pfam = str(pants_it.get("family", "")) if pants_it else ""
+	var bfam = str(boots_it.get("family", "")) if boots_it else ""
+	var agrade = int(armor.get("grade", 1)) if armor else 0
 
-	# ---- 腿与靴 ----
-	_rect(img, cx + 1, ty + 9, 3, 5, pants)
-	_rect(img, cx + 5, ty + 9, 3, 5, pants)
-	_rect(img, cx + 0, ty + 13, 4, 3, boots)
-	_rect(img, cx + 5, ty + 13, 4, 3, boots)
+	# 战士骨架（写实比例）：头 11×10（约体高 1/4.5）/ 躯干 14×14 / 腿 10 / 靴 9
+	var hx0 = 15 + lean       # 头部左缘（宽 11）
+	var hy0 = oy + 4 + bob    # 头部顶
+	var cx = 13 + lean        # 躯干左缘（宽 14）
+	var ty = oy + 15 + bob    # 躯干顶部（14 高）
 
-	# ---- 躯干（按护甲基底变化）----
-	_rect(img, cx, ty, 9, 9, amain)
-	_vline(img, cx, ty, 9, adark)
-	_vline(img, cx + 8, ty, 9, adark)
-	match afam:
-		"皮甲":
-			_hline(img, cx, ty + 5, 9, _dark(amain, 0.5))           # 腰带
-			_px(img, cx + 4, ty + 5, Color("#e8c95a"))               # 带扣
-		"锁子甲":
-			for yy in range(1, 8):
-				for xx in range(1, 8):
-					if (xx + yy) % 2 == 0:
-						_px(img, cx + xx, ty + yy, adark)            # 锁环网纹
-		"板甲":
-			_rect(img, cx - 1, ty, 3, 3, trim)                        # 左肩甲
-			_rect(img, cx + 7, ty, 3, 3, trim)                        # 右肩甲
-			_vline(img, cx + 4, ty + 1, 7, _light(amain))             # 胸中线
-			_hline(img, cx + 1, ty + 7, 7, adark)
-		"龙鳞甲":
+	# ============ 腿部（裤子：双腿分明，y ty+14..ty+23） ============
+	var ly = ty + 14
+	for i in range(2):
+		var leg_x = cx + 1 + i * 7    # 左腿 cx+1..cx+5 / 右腿 cx+8..cx+12（5 宽）
+		_rect(img, leg_x, ly, 5, 10, pmain)
+		_vline(img, leg_x + 4, ly, 10, pdark)               # 内/背光侧
+		_vline(img, leg_x, ly, 10, _light(pmain, 0.15))     # 受光侧
+		_hline(img, leg_x, ly + 9, 5, pdark)
+	match pfam:
+		"布裤":
+			_rect(img, cx + 9, ly + 4, 2, 2, pdark)          # 补丁
+		"皮裤":
+			_vline(img, cx + 3, ly + 1, 8, pdark)            # 皮革缝线
+			_vline(img, cx + 10, ly + 1, 8, pdark)
+			_hline(img, cx + 1, ly + 7, 5, pdark)            # 绑带
+			_hline(img, cx + 8, ly + 7, 5, pdark)
+		"链甲裤":
 			for yy in range(1, 9):
-				for xx in range(1, 8):
-					if yy % 2 == 0 and xx % 2 == (yy >> 1) % 2:
-						_px(img, cx + xx, ty + yy, _light(amain, 0.25))  # 鳞片
-			_px(img, cx - 1, ty, trim)                                # 肩刺
-			_px(img, cx + 9, ty, trim)
+				for xx in [1, 3, 8, 10, 12]:
+					if (xx + yy) % 2 == 0:
+						_px(img, cx + xx, ly + yy, pdark)
+		"板甲腿铠":
+			_rect(img, cx + 1, ly + 2, 5, 3, _light(pmain, 0.4))    # 膝甲板
+			_rect(img, cx + 8, ly + 2, 5, 3, _light(pmain, 0.4))
+			_hline(img, cx + 1, ly + 4, 5, pdark)
+			_hline(img, cx + 8, ly + 4, 5, pdark)
+			_vline(img, cx + 2, ly + 6, 4, _light(pmain, 0.25))     # 胫甲反光
+			_vline(img, cx + 9, ly + 6, 4, _light(pmain, 0.25))
+		"龙鳞腿甲":
+			for yy in range(1, 9, 2):
+				for xx in [1, 3, 8, 10]:
+					_px(img, cx + xx + (yy >> 1) % 2, ly + yy, _light(pmain, 0.32))
+			_px(img, cx + 1, ly + 2, trim)                   # 膝刺
+			_px(img, cx + 12, ly + 2, trim)
+
+	# ============ 鞋（靴筒 + 脚掌，y ty+24..ty+32） ============
+	var by = ly + 10
+	for i in range(2):
+		var bx = cx + 1 + i * 7
+		var toe = (-2 if i == 0 else 5)                      # 鞋尖朝外
+		_rect(img, bx, by, 5, 5, bmain)                      # 靴筒
+		_vline(img, bx, by, 5, _light(bmain, 0.25))
+		_vline(img, bx + 4, by, 5, bdark)
+		_rect(img, bx + (toe if i == 0 else 0), by + 5, 7, 3, bmain)  # 脚掌
+		_hline(img, bx + (toe if i == 0 else 0), by + 7, 7, bdark)    # 鞋底
+		_px(img, bx + (toe if i == 0 else 6), by + 5, _light(bmain, 0.3))  # 鞋尖受光
+	match bfam:
+		"草编鞋":
+			for yy in [by + 1, by + 3]:
+				_px(img, cx + 2, yy, bdark)
+				_px(img, cx + 10, yy, bdark)
+			_hline(img, cx + 1, by, 5, _dark(bmain, 0.5))    # 编织口
+			_hline(img, cx + 8, by, 5, _dark(bmain, 0.5))
+		"皮靴":
+			_hline(img, cx + 1, by + 1, 5, _dark(bmain, 0.5))   # 翻折靴口
+			_hline(img, cx + 8, by + 1, 5, _dark(bmain, 0.5))
+			_px(img, cx + 3, by + 3, gold)                   # 靴扣
+			_px(img, cx + 10, by + 3, gold)
+		"铁头靴":
+			_rect(img, cx - 1, by + 5, 2, 2, steel_hi)       # 铁鞋头
+			_rect(img, cx + 12, by + 5, 2, 2, steel_hi)
+			_hline(img, cx + 1, by, 5, steel_hi)             # 铁护胫缘
+			_hline(img, cx + 8, by, 5, steel_hi)
+		"疾风靴":
+			_px(img, cx, by + 1, Color("#eef4ff"))           # 踝部翼羽
+			_px(img, cx - 1, by, Color("#eef4ff"))
+			_px(img, cx - 2, by - 1, Color("#eef4ff"))
+			_px(img, cx + 12, by + 1, Color("#eef4ff"))
+			_px(img, cx + 13, by, Color("#eef4ff"))
+			_px(img, cx + 14, by - 1, Color("#eef4ff"))
+		"龙行靴":
+			for xx in [2, 4, 9, 11]:
+				_px(img, cx + xx, by + 1, _light(bmain, 0.4))   # 鳞列
+				_px(img, cx + xx, by + 3, _light(bmain, 0.4))
+			_px(img, cx - 2, by + 6, trim)                   # 爪尖
+			_px(img, cx + 13, by + 6, trim)
+
+	# ============ 腰带（裤腰，分隔躯干与腿） ============
+	_hline(img, cx + 1, ly - 1, 12, _dark(pmain, 0.42))
+	_rect(img, cx + 6, ly - 1, 2, 1, gold)                   # 带扣
+
+	# ============ 躯干（铠甲：14×14 大画布做真实甲胄结构） ============
+	_rect(img, cx, ty, 14, 14, amain)
+	_vline(img, cx + 13, ty, 14, adark)                      # 背光缘
+	_vline(img, cx, ty, 14, ahi)                             # 受光缘
+	_hline(img, cx + 1, ty, 12, ahi)
+	_hline(img, cx, ty + 13, 14, adark)
+	match afam:
 		"布甲", "":
-			_hline(img, cx, ty + 6, 9, adark)
-	if armor != null and afam != "板甲" and afam != "龙鳞甲":
-		_hline(img, cx, ty, 9, trim)                                  # 领口饰边
+			# 布衣：V 领衣襟 + 腰绳 + 褶皱
+			_px(img, cx + 6, ty + 1, adark); _px(img, cx + 7, ty + 1, adark)
+			_px(img, cx + 5, ty, adark); _px(img, cx + 8, ty, adark)
+			_vline(img, cx + 6, ty + 2, 9, _dark(amain, 0.8))
+			_hline(img, cx + 1, ty + 9, 12, _dark(amain, 0.6))   # 腰绳
+			_vline(img, cx + 3, ty + 10, 3, _dark(amain, 0.8))   # 垂褶
+			_vline(img, cx + 10, ty + 10, 3, _dark(amain, 0.8))
+		"皮甲":
+			# 皮甲：斜挎剑带 + 双层皮片 + 铆钉
+			for i in range(12):
+				_px(img, cx + 1 + i, ty + 1 + i / 2, _dark(amain, 0.55))   # 斜挎带
+			_hline(img, cx + 1, ty + 6, 12, _dark(amain, 0.6))   # 上皮片缘
+			_hline(img, cx + 1, ty + 10, 12, _dark(amain, 0.6))  # 下皮片缘
+			for xx in [2, 6, 11]:
+				_px(img, cx + xx, ty + 7, gold)               # 铆钉排
+			_px(img, cx + 4, ty + 2, gold)                    # 剑带扣
+		"锁子甲":
+			# 锁子甲：满身环锁 + 护颈锁圈 + 下摆
+			for yy in range(2, 13):
+				for xx in range(1, 13):
+					if (xx + yy) % 2 == 0:
+						_px(img, cx + xx, ty + yy, adark)
+			_hline(img, cx + 1, ty + 1, 12, _dark(amain, 0.5))   # 锁甲护颈缘
+			_hline(img, cx, ty + 12, 14, _dark(amain, 0.5))      # 锁甲下摆
+		"板甲":
+			# 板甲：护喉 + 大肩甲 + 分块胸甲 + 腹甲裙
+			_hline(img, cx + 4, ty, 6, trim)                  # 护喉
+			_rect(img, cx - 3, ty, 5, 5, trim)                # 左大肩甲
+			_rect(img, cx + 12, ty, 5, 5, trim)               # 右大肩甲
+			_hline(img, cx - 3, ty, 5, _light(trim, 0.45))
+			_hline(img, cx + 12, ty, 5, _light(trim, 0.45))
+			_hline(img, cx - 3, ty + 4, 5, _dark(trim, 0.6))
+			_hline(img, cx + 12, ty + 4, 5, _dark(trim, 0.6))
+			_vline(img, cx + 6, ty + 2, 7, _light(amain, 0.5))    # 胸甲中脊
+			_vline(img, cx + 7, ty + 2, 7, _light(amain, 0.2))
+			_hline(img, cx + 2, ty + 5, 10, _light(amain, 0.18))  # 胸肌甲弧线
+			_hline(img, cx + 1, ty + 9, 12, adark)            # 胸/腹甲分界
+			_hline(img, cx + 1, ty + 11, 12, _dark(amain, 0.75))  # 腹甲叠片
+			_px(img, cx + 2, ty + 2, gold); _px(img, cx + 11, ty + 2, gold)  # 铆钉
+		"龙鳞甲":
+			# 龙鳞甲：弧形鳞排 + 肩部龙刺 + 鳞缘
+			for yy in range(2, 13, 2):
+				for xx in range(1, 13, 3):
+					var sx = cx + xx + ((yy >> 1) % 2)
+					_px(img, sx, ty + yy, _light(amain, 0.32))
+					_px(img, sx + 1, ty + yy, _light(amain, 0.18))
+					_px(img, sx, ty + yy + 1, _dark(amain, 0.8))
+			_px(img, cx - 1, ty, trim); _px(img, cx - 2, ty - 1, trim)        # 左肩龙刺
+			_px(img, cx - 2, ty - 2, _light(trim, 0.4))
+			_px(img, cx + 14, ty, trim); _px(img, cx + 15, ty - 1, trim)      # 右肩龙刺
+			_px(img, cx + 15, ty - 2, _light(trim, 0.4))
+			_hline(img, cx + 1, ty + 1, 12, trim)             # 鳞甲领缘
+	if armor != null and afam in ["布甲", "皮甲", "锁子甲"]:
+		_hline(img, cx, ty, 14, trim)                          # 领口饰边
 
-	# ---- 手臂 ----
-	_rect(img, cx - 1, ty + 2, 2, 5, amain if armor else cloth)
-	_rect(img, cx + 8, ty + 2, 2, 5, amain if armor else cloth)
-	_px(img, cx - 1, ty + 7, skin)
-	_px(img, cx + 9, ty + 7, skin)
+	# ============ 手臂（带肩部结构） ============
+	var sleeve = amain if armor else cloth
+	for i in range(2):
+		var ax = (cx - 3) if i == 0 else (cx + 14)
+		_rect(img, ax, ty + 1, 3, 10, sleeve)
+		_vline(img, ax + (2 if i == 0 else 0), ty + 1, 10, _dark(sleeve, 0.72))
+		_vline(img, ax + (0 if i == 0 else 2), ty + 1, 10, _light(sleeve, 0.18))
+		# 手（拳）
+		_rect(img, ax, ty + 11, 3, 2, skin)
+		_px(img, ax + (2 if i == 0 else 0), ty + 12, skin_d)
+		# 护腕
+		_hline(img, ax, ty + 9, 3, _dark(sleeve, 0.55))
 
-	# ---- 头部 ----
-	var hy = ty - 7
-	_rect(img, cx + 1, hy, 7, 7, skin)
-	_hline(img, cx + 1, hy + 6, 7, skin_d)
-	# 头盔（按护甲品级）
-	if agrade >= 4:
-		_rect(img, cx + 1, hy - 1, 7, 4, amain)                       # 全盔
-		_vline(img, cx + 1, hy, 7, adark)
-		_vline(img, cx + 7, hy, 7, adark)
-		_rect(img, cx + 3, hy - 3, 3, 3, GameData.get_rarity_color(arar))  # 盔缨
-	elif agrade == 3:
-		_rect(img, cx + 1, hy - 1, 7, 3, amain)                       # 半盔
-		_hline(img, cx + 1, hy + 1, 7, adark)
-	elif agrade == 2:
-		_hline(img, cx + 1, hy - 1, 7, amain)                         # 软帽沿
-		_hline(img, cx + 1, hy, 7, hair)
-	else:
-		_rect(img, cx + 1, hy - 1, 7, 2, hair)                        # 头发
-	# 眼睛
-	var eye = Color("#1c2236")
+	# ============ 头部（写实小头：11 宽 × 10 高） ============
+	_rect(img, hx0, hy0 + 1, 11, 9, skin)
+	_hline(img, hx0 + 1, hy0 + 1, 9, skin_hi)                # 额头受光
+	_hline(img, hx0, hy0 + 9, 11, skin_d)                    # 下颌阴影
+	_vline(img, hx0 + 10, hy0 + 2, 7, skin_d)
+	# 颈部
+	_rect(img, hx0 + 3, hy0 + 10, 5, 1, skin_d)
+	# 眼睛（冷静的战士眼神；受伤帧闭眼）
+	var eye = Color("#1a2236")
+	var ey = hy0 + 5
 	if frame == 3:
-		_hline(img, cx + 2, hy + 3, 2, eye)
-		_hline(img, cx + 5, hy + 3, 2, eye)
+		_hline(img, hx0 + 2, ey + 1, 2, eye)
+		_hline(img, hx0 + 7, ey + 1, 2, eye)
 	else:
-		_px(img, cx + 2, hy + 3, eye)
-		_px(img, cx + 5, hy + 3, eye)
+		_hline(img, hx0 + 2, ey, 2, eye)
+		_hline(img, hx0 + 7, ey, 2, eye)
+		_px(img, hx0 + 2, ey - 1, _dark(hair, 0.8))          # 眉
+		_px(img, hx0 + 3, ey - 1, _dark(hair, 0.8))
+		_px(img, hx0 + 7, ey - 1, _dark(hair, 0.8))
+		_px(img, hx0 + 8, ey - 1, _dark(hair, 0.8))
+	# 嘴（抿紧）
+	_hline(img, hx0 + 4, hy0 + 8, 3, skin_d)
 
-	# ---- 饰品：胸前宝石 ----
+	# ============ 头盔（真实盔形设计；无盔=利落短发） ============
+	var hmain: Color = _gear_main(helmet, hair)
+	var hdark: Color = _dark(hmain)
+	var hhi: Color = _light(hmain, 0.38)
+	var htrim: Color = GameData.get_rarity_color(int(helmet.get("rarity", 0))) if helmet else hair
+	match hfam:
+		"":
+			# 利落短发：层次分明 + 鬓角
+			_rect(img, hx0, hy0 - 1, 11, 3, hair)
+			_hline(img, hx0 + 1, hy0 - 1, 7, hair_hi)
+			_px(img, hx0 + 9, hy0 + 2, hair)
+			_px(img, hx0, hy0 + 2, hair)
+			_px(img, hx0, hy0 + 3, hair)                       # 左鬓角
+			_px(img, hx0 + 10, hy0 + 3, hair)                  # 右鬓角
+		"皮帽":
+			# 游侠皮帽：斜檐 + 束带 + 翎羽
+			_rect(img, hx0 - 1, hy0 - 1, 13, 3, hmain)
+			_hline(img, hx0, hy0 - 1, 9, hhi)
+			_hline(img, hx0 - 2, hy0 + 1, 6, hdark)            # 左斜檐压低
+			_hline(img, hx0 - 1, hy0 + 2, 3, hdark)
+			_px(img, hx0 + 11, hy0 - 2, htrim)                 # 翎羽
+			_px(img, hx0 + 12, hy0 - 3, htrim)
+			_px(img, hx0 + 12, hy0 - 4, _light(htrim, 0.4))
+		"铁盔":
+			# 维京式护鼻盔：圆顶 + 包边 + 护鼻条
+			_rect(img, hx0, hy0 - 2, 11, 4, hmain)
+			_px(img, hx0 + 1, hy0 - 3, hmain); _hline(img, hx0 + 2, hy0 - 3, 7, hmain)
+			_hline(img, hx0 + 2, hy0 - 3, 5, hhi)              # 顶部受光
+			_hline(img, hx0, hy0 + 1, 11, hdark)               # 盔缘包边
+			_vline(img, hx0 + 5, hy0 + 2, 4, hmain)            # 护鼻条
+			_vline(img, hx0 + 5, hy0 + 2, 2, hhi)
+			_px(img, hx0 + 1, hy0 - 1, gold)                   # 缘饰铆钉
+			_px(img, hx0 + 9, hy0 - 1, gold)
+		"战盔":
+			# 军团战盔：横向冠脊 + 护颊 + 护颈
+			_rect(img, hx0, hy0 - 2, 11, 4, hmain)
+			_hline(img, hx0 + 1, hy0 - 2, 8, hhi)
+			_hline(img, hx0 - 1, hy0 - 3, 13, htrim)           # 横冠脊
+			_px(img, hx0 - 1, hy0 - 2, htrim)
+			_px(img, hx0 + 11, hy0 - 2, htrim)
+			_rect(img, hx0, hy0 + 2, 2, 6, hmain)              # 左护颊
+			_rect(img, hx0 + 9, hy0 + 2, 2, 6, hmain)          # 右护颊
+			_vline(img, hx0, hy0 + 2, 6, hdark)
+			_vline(img, hx0 + 10, hy0 + 2, 6, hdark)
+			_hline(img, hx0 + 3, hy0 + 10, 5, hdark)           # 护颈缘
+		"骑士盔":
+			# 全覆面巨盔：面甲观察缝 + 呼吸孔 + 高马尾盔缨
+			_rect(img, hx0, hy0 - 2, 11, 12, hmain)            # 整盔覆面
+			_vline(img, hx0, hy0 - 2, 12, hhi)
+			_vline(img, hx0 + 10, hy0 - 2, 12, hdark)
+			_hline(img, hx0 + 1, hy0 - 2, 9, hhi)
+			_hline(img, hx0 + 1, hy0 + 4, 9, Color("#0c101e"))  # 观察缝
+			_px(img, hx0 + 2, hy0 + 4, Color("#7fd8ff"))        # 缝中目光
+			_px(img, hx0 + 7, hy0 + 4, Color("#7fd8ff"))
+			for xx in [3, 5, 7]:
+				_px(img, hx0 + xx, hy0 + 7, hdark)              # 呼吸孔
+			_hline(img, hx0 + 2, hy0 + 1, 7, hdark)             # 面甲铰线
+			_vline(img, hx0 + 5, hy0 - 5, 3, htrim)             # 盔缨杆
+			_px(img, hx0 + 6, hy0 - 4, htrim)                   # 缨羽后飘
+			_px(img, hx0 + 7, hy0 - 3, htrim)
+			_px(img, hx0 + 8, hy0 - 3, _dark(htrim, 0.7))
+			_px(img, hx0 + 5, hy0 - 5, _light(htrim, 0.45))
+		"龙首盔":
+			# 龙首盔：上颌面甲 + 双弯角 + 颈鬃
+			_rect(img, hx0, hy0 - 2, 11, 5, hmain)             # 龙颅顶
+			_hline(img, hx0 + 1, hy0 - 2, 8, hhi)
+			_rect(img, hx0 - 1, hy0 + 2, 4, 2, hmain)          # 上颌左凸（龙吻）
+			_rect(img, hx0 + 8, hy0 + 2, 4, 2, hmain)
+			_px(img, hx0 - 1, hy0 + 3, _dark(hmain, 0.6))      # 龙齿阴影
+			_px(img, hx0 + 11, hy0 + 3, _dark(hmain, 0.6))
+			# 双弯角（向上外扬，角尖亮色）
+			_px(img, hx0 + 1, hy0 - 3, hmain)
+			_px(img, hx0, hy0 - 4, htrim)
+			_px(img, hx0 - 1, hy0 - 5, htrim)
+			_px(img, hx0 - 1, hy0 - 6, _light(htrim, 0.45))
+			_px(img, hx0 + 9, hy0 - 3, hmain)
+			_px(img, hx0 + 10, hy0 - 4, htrim)
+			_px(img, hx0 + 11, hy0 - 5, htrim)
+			_px(img, hx0 + 11, hy0 - 6, _light(htrim, 0.45))
+			_px(img, hx0 + 5, hy0 - 3, htrim)                  # 眉脊
+			_rect(img, hx0 + 4, hy0 - 1, 3, 1, _dark(hmain, 0.7))  # 鼻梁甲
+
+	# ============ 饰品：胸前项链宝石 ============
 	if acc != null:
 		var gpal = ELEM_PAL.get(str(acc.get("element", "")), ELEM_PAL[""])
-		_px(img, cx + 4, ty + 2, _c(gpal.p))
-		_px(img, cx + 4, ty + 3, _light(_c(gpal.p), 0.6))
+		var gem = _c(gpal.p)
+		_px(img, cx + 5, ty + 2, _dark(gem, 0.6))              # 链
+		_px(img, cx + 8, ty + 2, _dark(gem, 0.6))
+		_px(img, cx + 6, ty + 3, gem)
+		_px(img, cx + 7, ty + 3, _light(gem, 0.55))
+		_px(img, cx + 6, ty + 4, _dark(gem, 0.75))
+		_px(img, cx + 7, ty + 4, gem)
 
-	# ---- 副手盾（重甲）----
+	# ============ 副手鸢盾（重甲 4 级以上，攻击帧收起） ============
 	if agrade >= 4 and frame != 2:
-		_rect(img, cx - 3, ty + 2, 3, 5, adark)
-		_rect(img, cx - 2, ty + 3, 1, 3, trim)
+		_rect(img, cx - 7, ty + 3, 5, 8, adark)
+		_px(img, cx - 6, ty + 11, adark)                       # 盾尖
+		_px(img, cx - 5, ty + 11, adark)
+		_px(img, cx - 5, ty + 12, _dark(adark, 0.7))
+		_vline(img, cx - 5, ty + 4, 7, trim)                   # 盾面纹章
+		_hline(img, cx - 6, ty + 6, 3, trim)
+		_hline(img, cx - 7, ty + 3, 5, _light(adark, 0.35))
 
-	# ---- 武器（握在右手）----
+	# ============ 武器（握在右手） ============
 	if weapon != null:
 		_draw_hero_weapon(img, weapon, cx, ty, frame)
 
 static func _draw_hero_weapon(img: Image, weapon, cx: int, ty: int, frame: int) -> void:
 	var fam = str(weapon.get("family", "长剑"))
 	var wpal = ELEM_PAL.get(str(weapon.get("element", "")), ELEM_PAL[""])
-	var blade = Color("#cfd6e4").lerp(_c(wpal.p), 0.35)
-	var blade_hi = _light(blade, 0.4)
-	var grip = Color("#6e4a2a")
+	var blade = Color("#d8dfec").lerp(_c(wpal.p), 0.38)
+	var blade_hi = _light(blade, 0.5)
+	var blade_d = _dark(blade, 0.7)
+	var grip = Color("#7a5430")
 	var guard = _c(wpal.d)
-	var hx = cx + 9            # 右手
-	var hy = ty + 7
+	var gold = Color("#f2cf5e")
 	var atk = frame == 2
+	var hx = cx + 17 + (2 if atk else 0)   # 右手外侧（攻击帧前送）
+	var hy = ty + 11
+	var streak = Color(1, 1, 1, 0.35)      # 攻击残影
 
 	match fam:
 		"短剑", "长剑", "刺剑", "巨剑":
-			var lens = { "短剑": 6, "长剑": 9, "刺剑": 10, "巨剑": 11 }
-			var wid = 2 if fam == "巨剑" else 1
-			var l: int = lens.get(fam, 8)
+			# 真实剑形：短剑宽短 / 长剑十字血槽 / 刺剑细长杯护手 / 巨剑三宽巨刃
+			var lens = { "短剑": 9, "长剑": 14, "刺剑": 16, "巨剑": 18 }
+			var wid = 3 if fam == "巨剑" else (1 if fam == "刺剑" else 2)
+			var l: int = lens.get(fam, 13)
+			var bx = hx
+			var btop = hy - 2 - l
+			_rect(img, bx, btop, wid, l, blade)                 # 刃身
+			_vline(img, bx, btop + 2, l - 4, blade_hi)          # 受光刃面
+			if wid >= 2:
+				_vline(img, bx + wid - 1, btop + 2, l - 4, blade_d)
+			if fam in ["长剑", "巨剑"]:
+				_vline(img, bx + wid / 2, btop + 3, l - 6, blade_d)  # 血槽
+			# 剑尖收锋
+			_px(img, bx, btop - 1, blade_hi)
+			if wid >= 2:
+				_px(img, bx + 1, btop, blade)
+			match fam:
+				"短剑":
+					_hline(img, bx - 2, hy - 2, 6, guard)
+					_px(img, bx - 2, hy - 2, _light(guard, 0.3))
+				"长剑":
+					_hline(img, bx - 3, hy - 2, 8, guard)        # 十字护手
+					_px(img, bx - 3, hy - 3, guard)
+					_px(img, bx + 4, hy - 3, guard)
+					_px(img, bx - 3, hy - 2, _light(guard, 0.3))
+				"刺剑":
+					_rect(img, bx - 2, hy - 4, 5, 3, guard)      # 杯形护手
+					_px(img, bx - 2, hy - 5, guard)
+					_px(img, bx + 2, hy - 5, guard)
+					_px(img, bx - 1, hy - 4, _light(guard, 0.35))
+				"巨剑":
+					_hline(img, bx - 3, hy - 2, 9, guard)        # 厚重宽护手
+					_hline(img, bx - 3, hy - 3, 9, _dark(guard, 0.7))
+					_px(img, bx - 3, hy - 4, guard)
+					_px(img, bx + 5, hy - 4, guard)
+			_vline(img, bx + wid / 2, hy - 1, 3, grip)           # 握柄
+			_px(img, bx + wid / 2, hy + 2, gold)                 # 配重球
 			if atk:
-				_hline(img, hx + 1, hy - 2, l, blade)                # 前刺
-				if wid == 2:
-					_hline(img, hx + 1, hy - 1, l, _dark(blade))
-				_px(img, hx + l, hy - 2, blade_hi)
-				_vline(img, hx + 1, hy - 3, 3, guard)
-			else:
-				_rect(img, hx, hy - l - 1, wid, l, blade)            # 竖持
-				_px(img, hx, hy - l - 1, blade_hi)
-				_hline(img, hx - 1, hy - 1, 3, guard)
-				_px(img, hx, hy, grip)
+				_vline(img, bx - 3, btop + 3, l - 5, streak)     # 挥击残影
+				_px(img, bx - 4, btop + 5, streak)
 		"手斧", "战斧", "巨斧":
-			var hl = 7 if fam == "手斧" else 9
+			# 真实斧形：手斧短柄单刃 / 战斧长柄大刃背刺 / 巨斧双月刃
+			var hl = 10 if fam == "手斧" else 14
+			var sx = hx + 1
+			_vline(img, sx, hy - hl + 2, hl + 1, grip)           # 斧柄
+			_px(img, sx, hy - hl / 2, _dark(grip, 0.65))         # 缠绳
+			_px(img, sx, hy - hl / 2 + 2, _dark(grip, 0.65))
+			_px(img, sx, hy + 2, gold)                           # 柄尾箍
+			var bly = hy - hl + 2                                # 刃部基准
+			match fam:
+				"手斧":
+					_rect(img, sx + 1, bly, 4, 4, blade)
+					_vline(img, sx + 4, bly, 4, blade_hi)        # 弧刃口
+					_px(img, sx + 5, bly + 1, blade_hi)
+					_px(img, sx + 1, bly + 3, blade_d)
+				"战斧":
+					_rect(img, sx + 1, bly, 5, 6, blade)         # 大斧刃
+					_vline(img, sx + 5, bly, 6, blade_hi)
+					_px(img, sx + 6, bly + 1, blade_hi)          # 弧形外刃
+					_px(img, sx + 6, bly + 4, blade_hi)
+					_px(img, sx + 1, bly + 5, blade_d)
+					_rect(img, sx - 2, bly + 1, 2, 2, blade_d)   # 背刺锤头
+					_px(img, sx - 3, bly + 1, _dark(blade_d, 0.8))
+				"巨斧":
+					# 对称双月刃 + 顶刺（最具压迫感的剪影）
+					_rect(img, sx + 1, bly, 5, 6, blade)
+					_vline(img, sx + 5, bly, 6, blade_hi)
+					_px(img, sx + 6, bly + 1, blade_hi)
+					_px(img, sx + 6, bly + 4, blade_hi)
+					_rect(img, sx - 5, bly, 5, 6, blade_d)
+					_vline(img, sx - 5, bly, 6, _dark(blade_d, 0.8))
+					_px(img, sx - 6, bly + 1, _dark(blade_d, 0.8))
+					_px(img, sx - 6, bly + 4, _dark(blade_d, 0.8))
+					_px(img, sx, bly - 2, gold)                  # 顶刺
+					_px(img, sx, bly - 1, gold)
 			if atk:
-				_hline(img, hx, hy - 2, hl - 2, grip)
-				_rect(img, hx + hl - 3, hy - 5, 3, 4, blade)
-				_px(img, hx + hl - 1, hy - 5, blade_hi)
-			else:
-				_vline(img, hx, hy - hl, hl, grip)
-				_rect(img, hx + 1, hy - hl, 3, 3, blade)             # 斧刃
-				_px(img, hx + 1, hy - hl, blade_hi)
-				if fam == "巨斧":
-					_rect(img, hx - 3, hy - hl, 3, 3, _dark(blade)) # 双刃
+				_vline(img, sx - 3 if fam != "巨斧" else sx - 8, bly + 1, 4, streak)
 		"猎弓", "长弓", "劲弩":
 			if fam == "劲弩":
-				_hline(img, hx, hy - 3, 6, grip)                     # 弩身
-				_vline(img, hx + 1, hy - 5, 5, blade)                # 弩臂
-				_px(img, hx + 5, hy - 3, blade_hi)                   # 箭头
+				# 横持重弩：弩床 + 钢弩臂 + 绞盘 + 上弦箭
+				_hline(img, hx - 3, hy - 4, 11, grip)            # 弩床
+				_hline(img, hx - 3, hy - 3, 8, _dark(grip, 0.7))
+				_vline(img, hx, hy - 8, 9, blade)                # 钢弩臂
+				_px(img, hx, hy - 8, blade_hi)
+				_px(img, hx, hy, blade_hi)
+				_px(img, hx + 1, hy - 7, blade_d)
+				_px(img, hx + 1, hy - 1, blade_d)
+				_vline(img, hx + 1, hy - 6, 5, Color(1, 1, 1, 0.5))  # 弦
+				_px(img, hx - 2, hy - 5, gold)                   # 绞盘
+				_px(img, hx + 8, hy - 4, gold)                   # 箭头
 			else:
-				var bl = 8 if fam == "猎弓" else 10
+				# 竖持弓：猎弓短圆 / 长弓高大反曲（弓梢外翻）
+				var bl = 13 if fam == "猎弓" else 18
 				for i in range(bl):
-					var off = 2 if (i > 1 and i < bl - 2) else (1 if (i > 0 and i < bl - 1) else 0)
-					_px(img, hx + 1 + off, hy - bl + 1 + i, _c(wpal.d) if i % 3 == 0 else grip)
-				_vline(img, hx + 1, hy - bl + 1, bl, Color(1, 1, 1, 0.55))  # 弦
+					var t = float(i) / float(bl - 1)
+					var off = roundi(sin(t * PI) * (3.0 if fam == "猎弓" else 4.0))
+					var col = grip
+					if i % 4 == 0:
+						col = _c(wpal.d)                          # 缠藤段
+					if absi(i - bl / 2) <= 1:
+						col = _dark(grip, 0.6)                    # 握柄段
+					_px(img, hx + off, hy - bl + 5 + i, col)
+					_px(img, hx + off + 1, hy - bl + 5 + i, _dark(grip, 0.8))
+				_vline(img, hx, hy - bl + 5, bl, Color(1, 1, 1, 0.5))  # 弦
+				if fam == "长弓":
+					_px(img, hx - 1, hy - bl + 4, gold)           # 反曲弓梢
+					_px(img, hx - 1, hy + 5, gold)
 				if atk:
-					_hline(img, hx + 2, hy - bl / 2, 4, blade_hi)    # 搭箭
-			# 背后箭袋
-			_rect(img, cx - 2, ty + 1, 2, 4, Color("#4a3520"))
-			_px(img, cx - 2, ty, _c(wpal.p))
+					_hline(img, hx + 1, hy - bl / 2 + 5, 7, blade_hi)   # 搭箭
+					_px(img, hx + 8, hy - bl / 2 + 5, Color("#ffe9a0"))
+			# 背后箭袋（斜挎）
+			_rect(img, cx - 3, ty + 1, 2, 6, Color("#54421f"))
+			_px(img, cx - 3, ty, _c(wpal.p))
+			_px(img, cx - 2, ty, _light(_c(wpal.p), 0.4))
+			_px(img, cx - 2, ty - 1, _c(wpal.p))
 
 # ============================================================
 # 怪物精灵：高细节 2 帧（竖排）
@@ -263,7 +603,11 @@ static func enemy_texture(sprite_key: String, palette: Dictionary) -> ImageTextu
 	var size = _enemy_canvas(sprite_key)
 	var img = _img(size.x, size.y * 2)
 	for f in range(2):
-		_draw_enemy(img, sprite_key, palette, f * size.y, f)
+		# 逐帧绘制 → 描边 → 拼合（与英雄统一的描边风格）
+		var frame = _img(size.x, size.y)
+		_draw_enemy(frame, sprite_key, palette, 0, f)
+		_apply_outline(frame, OUTLINE)
+		img.blit_rect(frame, Rect2i(0, 0, size.x, size.y), Vector2i(0, f * size.y))
 	var t = _tex(img)
 	_cache[key] = t
 	return t
@@ -533,7 +877,10 @@ static func boss_texture(region: int, palette: Dictionary) -> ImageTexture:
 		return _cache[key]
 	var img = _img(30, 30 * 2)
 	for f in range(2):
-		_draw_boss(img, region, palette, f * 30, f)
+		var frame = _img(30, 30)
+		_draw_boss(frame, region, palette, 0, f)
+		_apply_outline(frame, OUTLINE)
+		img.blit_rect(frame, Rect2i(0, 0, 30, 30), Vector2i(0, f * 30))
 	var t = _tex(img)
 	_cache[key] = t
 	return t
@@ -711,6 +1058,7 @@ static func item_icon(item: Dictionary) -> ImageTexture:
 	var pc: Color = _c(pal.p)
 	var dc: Color = _c(pal.d)
 	_draw_icon(img, fam, pc, dc)
+	_apply_outline(img, OUTLINE)
 	var t = _tex(img)
 	_cache[key] = t
 	return t
@@ -780,6 +1128,71 @@ static func _draw_icon(img: Image, fam: String, pc: Color, dc: Color) -> void:
 						for xx in range(5, 9, 2):
 							_px(img, xx + (yy >> 1) % 2, yy, _light(pc, 0.35))
 					_px(img, 3, 2, dc); _px(img, 10, 2, dc)
+		"皮帽", "铁盔", "战盔", "骑士盔", "龙首盔":
+			# 头盔轮廓：穹顶 + 帽檐
+			_rect(img, 4, 4, 6, 4, pc)
+			_hline(img, 5, 3, 4, pc)
+			_px(img, 5, 3, _light(pc, 0.4))
+			_hline(img, 3, 8, 8, dc)                       # 帽檐
+			match fam:
+				"铁盔":
+					_px(img, 7, 2, dc)                      # 顶钉
+				"战盔":
+					_vline(img, 4, 9, 3, pc)                # 护颊
+					_vline(img, 9, 9, 3, pc)
+				"骑士盔":
+					_vline(img, 4, 9, 3, pc)
+					_vline(img, 9, 9, 3, pc)
+					_hline(img, 5, 10, 4, dc)               # 面甲缝
+					_rect(img, 6, 1, 2, 2, _light(pc, 0.5)) # 盔缨
+				"龙首盔":
+					_px(img, 3, 3, dc); _px(img, 2, 2, dc)  # 双角
+					_px(img, 10, 3, dc); _px(img, 11, 2, dc)
+					_vline(img, 4, 9, 3, pc)
+					_vline(img, 9, 9, 3, pc)
+		"布裤", "皮裤", "链甲裤", "板甲腿铠", "龙鳞腿甲":
+			# 裤子轮廓：腰 + 两条裤腿
+			_rect(img, 4, 3, 6, 3, pc)
+			_hline(img, 4, 3, 6, _light(pc, 0.3))
+			_rect(img, 4, 6, 2, 6, pc)
+			_rect(img, 8, 6, 2, 6, pc)
+			_vline(img, 5, 6, 6, dc)
+			_vline(img, 9, 6, 6, dc)
+			match fam:
+				"皮裤":
+					_hline(img, 4, 5, 6, dc)
+				"链甲裤":
+					for yy in range(6, 12, 2):
+						_px(img, 4, yy, dc)
+						_px(img, 8, yy + 1, dc)
+				"板甲腿铠":
+					_px(img, 4, 8, _light(pc, 0.45))        # 膝甲
+					_px(img, 8, 8, _light(pc, 0.45))
+				"龙鳞腿甲":
+					for yy in range(6, 12, 2):
+						_px(img, 4, yy, _light(pc, 0.35))
+						_px(img, 8, yy, _light(pc, 0.35))
+		"草编鞋", "皮靴", "铁头靴", "疾风靴", "龙行靴":
+			# 鞋（侧视）：靴筒 + 鞋头
+			_rect(img, 4, 4, 3, 6, pc)
+			_rect(img, 4, 9, 7, 3, pc)
+			_hline(img, 4, 11, 7, dc)                       # 鞋底
+			_px(img, 5, 4, _light(pc, 0.3))
+			_px(img, 10, 9, _light(pc, 0.2))                # 鞋尖
+			match fam:
+				"草编鞋":
+					for yy in range(5, 10, 2):
+						_px(img, 5, yy, dc)
+				"皮靴":
+					_hline(img, 4, 7, 3, dc)                # 靴口束带
+				"铁头靴":
+					_rect(img, 9, 9, 2, 2, Color("#cfd6e4"))
+				"疾风靴":
+					_px(img, 3, 5, _light(pc, 0.6))          # 翼羽
+					_px(img, 2, 4, _light(pc, 0.6))
+				"龙行靴":
+					_px(img, 4, 3, dc); _px(img, 6, 3, dc)   # 鳞脊
+					_px(img, 11, 10, dc)                     # 爪尖
 		"木刻护符":
 			_vline(img, 6, 2, 3, grip)
 			_rect(img, 4, 5, 5, 6, pc)

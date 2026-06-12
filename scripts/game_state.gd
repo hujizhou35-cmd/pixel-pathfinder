@@ -33,10 +33,20 @@ var bonus_max_hp: int = 0      # 事件带来的永久生命加成（本局有�
 # 熔炼词条精华：[{affix, from}]，锻打可赋予其他装备
 var essences: Array = []
 
-# 装备
+# 角色：名字 + 开局天赋点（每档存档独立）
+var hero_name: String = "冒险者"
+var talents: Dictionary = { "vit": 0, "str": 0, "tough": 0, "agi": 0 }
+
+# 天赋词条（击败区域首领后三选一，永久生效）
+var perks: Array = []
+
+# 装备（武器 / 铠甲 / 头盔 / 裤子 / 鞋 / 配饰）
 var equipment = {
 	"weapon": null,
 	"armor": null,
+	"helmet": null,
+	"pants": null,
+	"boots": null,
 	"accessory": null,
 }
 
@@ -46,6 +56,7 @@ var bag: Array = []
 # 地图
 var current_map: Dictionary = {}
 var current_node_idx: int = -1
+var hero_pos: int = -1          # 小人当前所站节点 id；-1 = 起点（地图下方）
 
 # 战斗
 var combat_state: Dictionary = {}
@@ -120,7 +131,8 @@ func reset_run_stats() -> void:
 	}
 
 ## 开始新远征。所有区域均已开放，可从任意区域出发（推荐 1→5）
-func start_new_game(start_region: int = 0) -> void:
+## new_name: 角色名；new_talents: 开局天赋点分配 {vit/str/tough/agi}
+func start_new_game(start_region: int = 0, new_name: String = "", new_talents: Dictionary = {}) -> void:
 	reset_run_stats()
 	clear_save()
 	region = clampi(start_region, 0, GameData.BIOMES.size() - 1)
@@ -131,14 +143,24 @@ func start_new_game(start_region: int = 0) -> void:
 	bonus_max_hp = 0
 	recent_events.clear()
 	essences.clear()
+	perks.clear()
 	bag.clear()
+
+	# 角色名与天赋
+	hero_name = new_name.strip_edges()
+	if hero_name == "":
+		hero_name = "冒险者"
+	talents = { "vit": 0, "str": 0, "tough": 0, "agi": 0 }
+	for k in GameData.TALENT_KEYS:
+		talents[k] = maxi(0, int(new_talents.get(k, 0)))
 
 	# 初始装备
 	var sword = EquipmentFactory.create_starter_weapon()
 	var armor = EquipmentFactory.create_starter_armor()
+	for slot in GameData.EQUIP_SLOTS:
+		equipment[slot] = null
 	equipment["weapon"] = sword
 	equipment["armor"] = armor
-	equipment["accessory"] = null
 
 	# 计算最大生命
 	_recalc_stats()
@@ -156,6 +178,7 @@ func start_new_game(start_region: int = 0) -> void:
 func start_region(r: int) -> void:
 	region = r
 	current_node_idx = -1
+	hero_pos = -1
 	current_map = MapGenerator.generate_map(r, cycle)
 	change_state(State.MAP)
 	_recalc_stats()
@@ -357,6 +380,23 @@ func add_to_bag(item: Dictionary) -> bool:
 	SignalBus.bag_changed.emit(bag.duplicate())
 	return true
 
+## 整理背包：按槽位 → 稀有度 → 品级 → 强化等级排序
+func sort_bag() -> void:
+	var slot_order = { "weapon": 0, "armor": 1, "helmet": 2, "pants": 3, "boots": 4, "accessory": 5 }
+	bag.sort_custom(func(a, b):
+		var sa: int = slot_order.get(str(a.get("slot", "")), 9)
+		var sb: int = slot_order.get(str(b.get("slot", "")), 9)
+		if sa != sb:
+			return sa < sb
+		if int(a.rarity) != int(b.rarity):
+			return int(a.rarity) > int(b.rarity)
+		if int(a.get("grade", 1)) != int(b.get("grade", 1)):
+			return int(a.get("grade", 1)) > int(b.get("grade", 1))
+		return int(a.level) > int(b.level)
+	)
+	SignalBus.bag_changed.emit(bag.duplicate())
+	save_game()
+
 # ============================================================
 # 药水操作
 # ============================================================
@@ -406,14 +446,25 @@ func enter_combat(elite: bool = false, boss: bool = false, foes: Array = []) -> 
 
 # ============================================================
 # 节点进入
+# 已结束的战斗/宝箱/事件不可再进（可作通路经过）；商店可重复进入
 # ============================================================
+func can_enter_node(node_data: Dictionary) -> bool:
+	if node_data.type == GameData.NodeType.SHOP:
+		return true
+	return not bool(node_data.get("visited", false))
+
 func enter_node(node_data: Dictionary) -> void:
+	if not can_enter_node(node_data):
+		SignalBus.show_toast.emit("这里已经探索过了")
+		return
 	# 进入节点前快照存档：无论何时退出游戏，都能从此处继续
+	hero_pos = node_data.id
 	save_game()
 
 	current_node_idx = node_data.id
+	if not bool(node_data.get("visited", false)):
+		run_stats.nodes_visited += 1
 	node_data.visited = true
-	run_stats.nodes_visited += 1
 
 	var foes: Array = node_data.get("foes", [])
 	match node_data.type:
@@ -452,8 +503,9 @@ func open_shop() -> void:
 	var stats = get_player_stats()
 	var disc = 1.0 - stats.discount / 100.0
 	shop_stock.clear()
-	# 5 件随机商品：必含武器/防具/饰品各 1，再补 2 件随机
-	var slots = ["weapon", "armor", "accessory", "", ""]
+	# 9 件随机商品：六个槽位各 1，再补 3 件随机（商店可重复进入，每次进货）
+	var slots = GameData.EQUIP_SLOTS.duplicate()
+	slots.append_array(["", "", ""])
 	for i in range(slots.size()):
 		var it = EquipmentFactory.generate_item(region, slots[i], -1, "shop")
 		it["price"] = roundi(it.value * 1.6 * disc / 5.0) * 5
@@ -643,9 +695,63 @@ func close_reward() -> void:
 
 # ============================================================
 # 区域/游戏结算（无限周目：通关 5 区进入强化周目，存档保留）
+# 通关区域 2 / 区域 5（含周目循环）→ 三选一天赋词条 → 再进入区域结算
+# 词条上限 5 条，超出需选择替换
 # ============================================================
+func roll_perk_offers(n: int = 3) -> Array:
+	var pool = []
+	for k in GameData.PERK_KEYS:
+		if not perks.has(k):
+			pool.append(k)
+	pool.shuffle()
+	return pool.slice(0, mini(n, pool.size()))
+
+func choose_perk(key: String) -> void:
+	if key == "" or not GameData.PERKS.has(key) or perks.has(key):
+		_region_clear_continue()
+		return
+	# 已达上限 → 进入替换选择
+	if perks.size() >= GameData.PERK_CAP:
+		SignalBus.show_modal.emit("perk_replace", { "new": key })
+		return
+	perks.append(key)
+	var pd = GameData.get_perk(key)
+	_recalc_stats()
+	SignalBus.show_toast.emit("获得天赋词条「%s」：%s" % [pd.name, pd.desc])
+	Sfx.play("upgrade")
+	_region_clear_continue()
+
+## 用新词条替换一条已有词条（上限 5 时）
+func replace_perk(old_key: String, new_key: String) -> void:
+	if perks.has(old_key) and GameData.PERKS.has(new_key) and not perks.has(new_key):
+		perks.erase(old_key)
+		perks.append(new_key)
+		_recalc_stats()
+		hp = mini(hp, max_hp)
+		SignalBus.hp_changed.emit(hp, max_hp)
+		var od = GameData.get_perk(old_key)
+		var nd = GameData.get_perk(new_key)
+		SignalBus.show_toast.emit("「%s」替换为「%s」" % [od.name, nd.name])
+		Sfx.play("upgrade")
+	_region_clear_continue()
+
+## 放弃本次天赋选择
+func skip_perk() -> void:
+	_region_clear_continue()
+
 func region_clear() -> void:
 	region_buff = 0.0
+	# 仅在里程碑区域（区域 2 / 区域 5）通关后提供天赋三选一
+	if not (region in GameData.PERK_MILESTONE_REGIONS):
+		_region_clear_continue()
+		return
+	var offers = roll_perk_offers(3)
+	if offers.is_empty():
+		_region_clear_continue()
+	else:
+		SignalBus.show_modal.emit("perk_choice", { "offers": offers })
+
+func _region_clear_continue() -> void:
 	if region >= GameData.BIOMES.size() - 1:
 		# 整轮通关 → 进入下一个强化周目
 		var cleared_cycle = cycle
@@ -686,6 +792,7 @@ func player_defeated() -> void:
 	hp = max_hp
 	region_buff = 0.0
 	current_node_idx = -1
+	hero_pos = -1
 	current_map = MapGenerator.generate_map(region, cycle)
 	save_game(true)
 	SignalBus.show_modal.emit("defeat", { "region": region, "lost_gold": lost, "stats": run_stats.duplicate() })
@@ -719,14 +826,61 @@ func buy_shop_item(index: int) -> bool:
 	return true
 
 # ============================================================
-# 地图访问（自由选关：所有未探索节点随时可进）
+# 地图访问（路线制：小人沿连线移动，站上节点后选择是否进入）
+# - 已结束的战斗可经过但不可再进；商店可重复进入
 # ============================================================
+func get_node_by_id(id: int):
+	for n in current_map.get("nodes", []):
+		if int(n.id) == id:
+			return n
+	return null
+
+## 与小人当前位置相邻（有连线）的节点 id；起点(-1) → 最下排全部
+func get_adjacent_ids(pos: int = -2) -> Array:
+	if pos == -2:
+		pos = hero_pos
+	var nodes: Array = current_map.get("nodes", [])
+	var out = []
+	if pos < 0:
+		for n in nodes:
+			if int(n.row) == 0:
+				out.append(int(n.id))
+		return out
+	var cur = get_node_by_id(pos)
+	if cur == null:
+		return out
+	for nx in cur.next:
+		out.append(int(nx))
+	# 反向边：可折返去探索另一条路径
+	for n in nodes:
+		for nx in n.next:
+			if int(nx) == pos and not out.has(int(n.id)):
+				out.append(int(n.id))
+	# 保险：节点意外没有任何连线（异常存档）→ 相邻排全部可走，绝不卡死
+	if out.is_empty():
+		for n in nodes:
+			if absi(int(n.row) - int(cur.row)) == 1:
+				out.append(int(n.id))
+	return out
+
+## 移动小人到相邻节点（只是站上去/经过，不触发节点内容）
+func move_hero(node_id: int) -> bool:
+	if current_state != State.MAP:
+		return false
+	if not get_adjacent_ids().has(node_id):
+		return false
+	hero_pos = node_id
+	save_game()
+	return true
+
+## 兼容旧接口：当前可移动到的相邻节点
 func get_reachable_nodes() -> Array:
 	if current_state != State.MAP:
 		return []
+	var ids = get_adjacent_ids()
 	var out = []
 	for n in current_map.get("nodes", []):
-		if not n.visited:
+		if ids.has(int(n.id)):
 			out.append(n)
 	return out
 
@@ -802,6 +956,7 @@ func get_slot_info(slot: int) -> Dictionary:
 		"gold": int(parsed.get("gold", 0)),
 		"hp": int(parsed.get("hp", 0)),
 		"kills": int(stats.get("kills", 0)) if stats is Dictionary else 0,
+		"hero_name": str(parsed.get("hero_name", "冒险者")),
 		"timestamp": str(parsed.get("timestamp", "")),
 	}
 
@@ -812,7 +967,7 @@ func save_game(force: bool = false) -> void:
 	if not force and not (current_state in [State.MAP, State.TITLE]):
 		return
 	var data = {
-		"version": 4,
+		"version": 5,
 		"timestamp": Time.get_datetime_string_from_system(false, true),
 		"region": region,
 		"cycle": cycle,
@@ -823,10 +978,14 @@ func save_game(force: bool = false) -> void:
 		"bonus_max_hp": bonus_max_hp,
 		"recent_events": recent_events,
 		"essences": essences,
+		"hero_name": hero_name,
+		"talents": talents,
+		"perks": perks,
 		"equipment": equipment,
 		"bag": bag,
 		"map_nodes": current_map.get("nodes", []),
 		"current_node_idx": current_node_idx,
+		"hero_pos": hero_pos,
 		"run_stats": run_stats,
 	}
 	var f = FileAccess.open(_slot_path(save_slot), FileAccess.WRITE)
@@ -854,6 +1013,7 @@ func load_game(slot: int = -1) -> bool:
 	region_buff = float(parsed.get("region_buff", 0.0))
 	bonus_max_hp = int(parsed.get("bonus_max_hp", 0))
 	current_node_idx = int(parsed.get("current_node_idx", -1))
+	hero_pos = int(parsed.get("hero_pos", -1))
 	run_stats = _coerce_int_dict(parsed.get("run_stats", {}))
 	if run_stats.is_empty():
 		reset_run_stats()
@@ -865,9 +1025,25 @@ func load_game(slot: int = -1) -> bool:
 		if es is Dictionary and es.has("affix"):
 			essences.append({ "affix": str(es.affix), "from": str(es.get("from", "")) })
 
-	equipment = { "weapon": null, "armor": null, "accessory": null }
+	# 角色名 / 天赋 / 天赋词条（v5；旧档默认值）
+	hero_name = str(parsed.get("hero_name", "冒险者"))
+	if hero_name.strip_edges() == "":
+		hero_name = "冒险者"
+	talents = { "vit": 0, "str": 0, "tough": 0, "agi": 0 }
+	var tl = parsed.get("talents", {})
+	if tl is Dictionary:
+		for k in GameData.TALENT_KEYS:
+			talents[k] = maxi(0, int(tl.get(k, 0)))
+	perks.clear()
+	for p in parsed.get("perks", []):
+		if GameData.PERKS.has(str(p)) and not perks.has(str(p)):
+			perks.append(str(p))
+
+	equipment = {}
+	for slot_name in GameData.EQUIP_SLOTS:
+		equipment[slot_name] = null
 	var eq = parsed.get("equipment", {})
-	for slot_name in ["weapon", "armor", "accessory"]:
+	for slot_name in GameData.EQUIP_SLOTS:
 		var it = eq.get(slot_name)
 		if it is Dictionary:
 			equipment[slot_name] = _restore_item(it)
@@ -927,6 +1103,8 @@ func load_game(slot: int = -1) -> bool:
 				row.append(n)
 		row.sort_custom(func(a, b): return a.col < b.col)
 		rows.append(row)
+	# 旧版存档地图没有节点连线 → 补织路线，避免小人无路可走卡死
+	MapGenerator.ensure_links(rows)
 	current_map = { "rows": rows, "nodes": nodes, "region": region, "cycle": cycle }
 
 	_recalc_stats()

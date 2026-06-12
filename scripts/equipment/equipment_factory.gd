@@ -19,10 +19,21 @@ static func effective_region(region: int) -> int:
 	return region + cycle * 5
 
 static func generate_item(region: int, slot: String = "", min_rarity: int = -1, tier: String = "") -> Dictionary:
-	# 决定槽位
+	# 决定槽位（武器最常见，护具四件分摊，配饰其次）
 	if slot == "":
 		var roll = randf()
-		slot = "weapon" if roll < 0.5 else "armor" if roll < 0.75 else "accessory"
+		if roll < 0.34:
+			slot = "weapon"
+		elif roll < 0.50:
+			slot = "armor"
+		elif roll < 0.62:
+			slot = "helmet"
+		elif roll < 0.74:
+			slot = "pants"
+		elif roll < 0.86:
+			slot = "boots"
+		else:
+			slot = "accessory"
 
 	# 决定稀有度
 	var rar: int
@@ -72,8 +83,11 @@ static func build_from_entry(entry: Dictionary, eff: int, rar: int) -> Dictionar
 static func _unique_for(key: String) -> String:
 	if GameData.WEAPON_TEMPLATES.has(key):
 		return GameData.WEAPON_TEMPLATES[key].unique_5
-	if key == "armor":
-		return GameData.ARMOR_TEMPLATES["armor"].unique_5
+	match key:
+		"armor": return GameData.ARMOR_TEMPLATES["armor"].unique_5
+		"helmet": return GameData.HELMET_TEMPLATES["helmet"].unique_5
+		"pants": return GameData.PANTS_TEMPLATES["pants"].unique_5
+		"boots": return GameData.BOOTS_TEMPLATES["boots"].unique_5
 	return GameData.ACCESSORY_TEMPLATES["amulet"].unique_5
 
 static func create_starter_weapon() -> Dictionary:
@@ -114,6 +128,7 @@ static func _roll_rarity_weighted(weights: Array) -> int:
 	return weights.size() - 1
 
 # 浮动收窄到 ±5%，保证稀有度之间的属性档位不会互相越级
+# 护具分摊：铠甲为主，头盔/裤子/鞋为辅（四件合计略高于旧版单件铠甲）
 static func _generate_stats(item: Dictionary, slot: String, eff: int, mult: float) -> void:
 	match slot:
 		"weapon":
@@ -122,6 +137,15 @@ static func _generate_stats(item: Dictionary, slot: String, eff: int, mult: floa
 		"armor":
 			item.stats.def = maxi(1, roundi((2.0 + eff * 1.6) * mult * randf_range(0.95, 1.05)))
 			item.stats.hp = roundi((8.0 + eff * 7.0) * mult)
+		"helmet":
+			item.stats.def = maxi(1, roundi((1.0 + eff * 0.8) * mult * randf_range(0.95, 1.05)))
+			item.stats.hp = roundi((5.0 + eff * 3.5) * mult)
+		"pants":
+			item.stats.def = maxi(1, roundi((1.5 + eff * 1.0) * mult * randf_range(0.95, 1.05)))
+			item.stats.hp = roundi((6.0 + eff * 4.0) * mult)
+		"boots":
+			item.stats.def = maxi(1, roundi((1.0 + eff * 0.6) * mult * randf_range(0.95, 1.05)))
+			item.stats.hp = roundi((4.0 + eff * 2.5) * mult)
 		"accessory":
 			item.stats.atk = roundi((1.0 + eff * 1.2) * mult)
 			item.stats.def = roundi((1.0 + eff * 0.8) * mult)
