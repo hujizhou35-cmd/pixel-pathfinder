@@ -70,8 +70,21 @@ func _force_player_turn() -> void:
 func _run() -> void:
 	var modal = main_node.modal_layer
 
+	# ---- 0. CG 资源与数据 ----
+	_check(GameData.CG_DATA.size() == 13, "CG 文案共 13 条")
+	var cg_files_ok = true
+	for i in range(1, 14):
+		if not FileAccess.file_exists("res://assets/cg/%d.png" % i):
+			cg_files_ok = false
+	_check(cg_files_ok, "13 张 CG 图片资源齐全")
+
 	# ---- 1. 新游戏（带起名与天赋点） ----
 	GameState.start_new_game(2, "测试勇者", { "vit": 4, "str": 3, "tough": 2, "agi": 1 })
+	await _frames()
+	# 区域进入 CG 会自动播放 → 验证后跳过
+	_check(main_node.cg_layer.is_playing(), "进入区域时播放剧情 CG")
+	_check(GameState.seen_cgs.has("enter_2"), "CG 播放记录入档（每存档一次）")
+	main_node.cg_layer.skip_all()
 	await _frames()
 	_check(GameState.current_state == GameState.State.MAP, "新游戏进入地图（区域3开局）")
 	_check(GameState.region == 2 and GameState.cycle == 0, "全地图开放：区域3 · 1周目")
@@ -185,7 +198,7 @@ func _run() -> void:
 	boots5.level = 5
 	var eq6 = { "weapon": null, "armor": null, "helmet": helm, "pants": pants5, "boots": boots5, "accessory": null }
 	var s6 = EquipmentModifier.calculate_total_stats(eq6)
-	_check(s6.shield_start >= 12, "头盔 +5：开战护盾 +12 (实际 %d)" % s6.shield_start)
+	_check(s6.shield_start >= 8, "头盔 +5：开战护盾 +8（已削弱）(实际 %d)" % s6.shield_start)
 	_check(s6.regen >= 3, "裤子 +5：每回合恢复 3 (实际 %d)" % s6.regen)
 	_check(s6.dodge_chance >= 15, "鞋 +5：闪避 15%% (实际 %d)" % s6.dodge_chance)
 
@@ -208,6 +221,12 @@ func _run() -> void:
 	_check(guard.style == "bash", "守护者为盾击风格")
 	var wolf_e = CombatManager.build_enemy({ "key": "wolf", "elite": false, "boss": false, "affixes": [], "element": "wood" }, 0, 0)
 	_check(wolf_e.style == "feral", "灰狼为先手风格")
+	# 周目增强：攻击与护盾
+	var guard_c1 = CombatManager.build_enemy({ "key": "guardian", "elite": false, "boss": false, "affixes": ["shielded"], "element": "metal" }, 0, 1)
+	_check(guard_c1.shield > guard.shield, "周目提升怪物护盾 (%d→%d)" % [guard.shield, guard_c1.shield])
+	var atk_c0 = CombatManager.enemy_stats_for(plain_foe, 0, 0).atk
+	var atk_c1 = CombatManager.enemy_stats_for(plain_foe, 0, 1).atk
+	_check(atk_c1 >= roundi(atk_c0 * 1.5), "周目攻击力增强 ×1.6 (%d→%d)" % [atk_c0, atk_c1])
 
 	# ---- 6. 强化投入与出售返还 ----
 	GameState.gold = 10000
@@ -248,11 +267,34 @@ func _run() -> void:
 	_check(ok_smelt and GameState.essences.size() == 1 and GameState.bag.is_empty(), "熔炼史诗装备 → 词条精华")
 	var wpn = GameState.equipment.weapon
 	wpn["affixes"] = []
+	wpn["affix_lv"] = {}
 	var gold_b = GameState.gold
 	var ok_forge = GameState.forge_essence(0, { "kind": "equip", "slot": "weapon" })
 	_check(ok_forge and wpn.affixes.has(target_affix), "锻打：精华附着到武器")
 	_check(GameState.gold == gold_b - GameState.get_forge_cost(), "锻打消耗金币")
 	_check(GameState.essences.is_empty(), "精华已消耗")
+
+	# ---- 9b. 同词条锻打 → 词条强化（连击 Lv 系统） ----
+	wpn["affixes"] = ["multihit"]
+	wpn["affix_lv"] = {}
+	var s_lv1 = EquipmentModifier.calculate_total_stats(GameState.equipment)
+	_check(int(s_lv1.multihit) == 1, "连击词条 Lv.1：连击数 +1")
+	GameState.essences.append({ "affix": "multihit", "from": "测试" })
+	var ok_up = GameState.forge_essence(0, { "kind": "equip", "slot": "weapon" })
+	_check(ok_up and GameState.affix_level_of(wpn, "multihit") == 2, "同词条锻打 → 连击强化至 Lv.2")
+	var s_lv2 = EquipmentModifier.calculate_total_stats(GameState.equipment)
+	_check(int(s_lv2.multihit) == 2, "连击 Lv.2：连击数 +2 真实生效")
+	wpn.affix_lv["multihit"] = GameData.AFFIX_MAX_LEVEL
+	_check(not GameState.can_forge_to(wpn, "multihit").ok, "词条达 Lv.%d 后不可再强化" % GameData.AFFIX_MAX_LEVEL)
+	wpn["affixes"] = ["focus"]
+	wpn["affix_lv"] = {}
+	_check(not GameState.can_forge_to(wpn, "focus").ok, "开关型词条（蓄势）不可强化")
+	# 贯连词条 → crit_combo 属性
+	wpn["affixes"] = ["critcombo"]
+	var s_cc = EquipmentModifier.calculate_total_stats(GameState.equipment)
+	_check(int(s_cc.crit_combo) == 1, "贯连词条：暴击叠连击属性生效")
+	wpn["affixes"] = []
+	wpn["affix_lv"] = {}
 
 	# ---- 10. 背包：扩容 32 + 整理排序 ----
 	_check(GameData.PLAYER_BASE["bag_capacity"] == 32, "背包容量 32")
@@ -381,6 +423,32 @@ func _run() -> void:
 	cn._do_hit(0, 1.0, crit_stats, "bow")
 	_check(int(GameState.combat_state.crits_this_action) == 2, "暴击计数正确 (%d)" % int(GameState.combat_state.crits_this_action))
 
+	# 弓暴击不再自带叠连击（需贯连词条/连击之道天赋）
+	GameState.talents["agi"] = 60   # 暴击率拉满 → 每箭必暴击
+	bow_w["affixes"] = []
+	bow_w["affix_lv"] = {}
+	GameState.equipment.weapon = bow_w
+	GameState._recalc_stats()
+	_force_player_turn()
+	GameState.combat_state.bow_combo = 0
+	cn.player_attack(0)
+	_check(int(GameState.combat_state.bow_combo) == 0, "无贯连词条：暴击不叠连击（弓不再自带）")
+	bow_w["affixes"] = ["critcombo"]
+	GameState._recalc_stats()
+	_force_player_turn()
+	cn.player_attack(0)
+	_check(int(GameState.combat_state.bow_combo) > 0, "贯连词条：暴击后连击数 +%d" % int(GameState.combat_state.bow_combo))
+	GameState.talents["agi"] = 1
+	bow_w["affixes"] = []
+	GameState._recalc_stats()
+
+	# 护盾上限：一次灌入超大护盾 → 截断到最大生命 40%
+	GameState.combat_state.shield = 0
+	cn._grant_player_shield(GameState.get_player_stats(), 99999.0)
+	var sh_cap = maxi(1, roundi(GameState.max_hp * GameData.COMBAT["shield_cap_pct"]))
+	_check(int(GameState.combat_state.shield) == sh_cap, "护盾上限 = 最大生命 40%% (%d)" % sh_cap)
+	GameState.combat_state.shield = 0
+
 	# 防御冷却
 	_force_player_turn()
 	main_node.combat_node.player_defend()
@@ -464,8 +532,12 @@ func _run() -> void:
 	GameState.region = 0
 	GameState.change_state(GameState.State.REWARD)
 	GameState.region_clear()
+	await _frames(2)
+	_check(main_node.cg_layer.is_playing(), "区域首领战后播放 CG")
+	main_node.cg_layer.skip_all()
 	await _frames(3)
 	_check(modal._current_type == "region_clear", "区域 1 通关不弹天赋（非里程碑）")
+	_check(GameState.seen_cgs.has("clear_0"), "首领战后 CG 仅一次（已记录）")
 	modal.close_all()
 	GameState.perks = ["giant", "ironwall", "sharpeye", "brutal", "windrunner"]
 	GameState.choose_perk("berserker")
@@ -478,10 +550,13 @@ func _run() -> void:
 	modal.close_all()
 	GameState.perks = ["berserker"]   # 留出空位，供下一节追加
 
-	# ---- 17. 无限周目：通关第 5 区（里程碑）→ 天赋三选一 → 强化周目 ----
+	# ---- 17. 无限周目：通关第 5 区（里程碑）→ 终局 CG → 天赋三选一 → 强化周目 ----
 	GameState.region = 4
 	GameState.change_state(GameState.State.REWARD)
 	GameState.region_clear()
+	await _frames(2)
+	_check(main_node.cg_layer.is_playing(), "最终首领战后播放终局三连 CG")
+	main_node.cg_layer.skip_all()
 	await _frames(4)
 	_check(modal._current_type == "perk_choice", "区域 5（里程碑）通关后弹出天赋三选一")
 	var offers: Array = modal._current_data.get("offers", [])
@@ -496,6 +571,7 @@ func _run() -> void:
 	_check(GameState.has_save(), "通关后存档保留（无限循环）")
 	_check(modal._current_type == "victory", "通关弹窗显示")
 	modal.close_all()
+	main_node.cg_layer.skip_all()   # 新周目区域 1 的进入 CG
 	await _frames(2)
 	var cyc_enemy = CombatManager.enemy_stats_for(plain_foe, 0, GameState.cycle)
 	_check(cyc_enemy.hp > st_p.hp, "新周目怪物已强化")
@@ -509,6 +585,7 @@ func _run() -> void:
 	# ---- 18. 区域切换 ----
 	GameState.change_state(GameState.State.MAP)
 	GameState.switch_region(3)
+	main_node.cg_layer.skip_all()
 	await _frames(2)
 	_check(GameState.region == 3 and GameState.cycle == 1, "切区保持周目")
 

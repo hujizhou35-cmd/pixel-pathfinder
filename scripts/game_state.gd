@@ -40,6 +40,11 @@ var talents: Dictionary = { "vit": 0, "str": 0, "tough": 0, "agi": 0 }
 # 天赋词条（击败区域首领后三选一，永久生效）
 var perks: Array = []
 
+# 已播放过的剧情 CG（每存档独立；终局 CG 每周目都播）
+var seen_cgs: Array = []
+var _cg_pending_node = null      # CG 播放后待进入的节点（区域 5 首领战前 CG）
+var _cg_skip_once: bool = false  # 防止 CG 后再次触发同一 CG
+
 # 装备（武器 / 铠甲 / 头盔 / 裤子 / 鞋 / 配饰）
 var equipment = {
 	"weapon": null,
@@ -91,7 +96,31 @@ func _ready():
 	randomize()
 	_load_settings()
 	_migrate_legacy_save()
+	SignalBus.cg_finished.connect(_on_cg_finished)
 	print("[GameState] 初始化完成，当前存档位: %d" % (save_slot + 1))
+
+# ============================================================
+# 剧情 CG 流程
+# ============================================================
+func _cg_seen(key: String) -> bool:
+	return seen_cgs.has(key)
+
+func _mark_cg(key: String) -> void:
+	if not seen_cgs.has(key):
+		seen_cgs.append(key)
+
+func _on_cg_finished(tag: String) -> void:
+	match tag:
+		"region_clear":
+			_region_clear_after_cg()
+		"pre_boss":
+			if _cg_pending_node != null:
+				var node = _cg_pending_node
+				_cg_pending_node = null
+				_cg_skip_once = true
+				enter_node(node)
+		_:
+			pass
 
 ## 关闭窗口时自动保存（地图状态下覆盖保存；其它状态保留进节点前的快照）
 func _notification(what: int) -> void:
@@ -144,6 +173,7 @@ func start_new_game(start_region: int = 0, new_name: String = "", new_talents: D
 	recent_events.clear()
 	essences.clear()
 	perks.clear()
+	seen_cgs.clear()
 	bag.clear()
 
 	# 角色名与天赋
@@ -186,6 +216,12 @@ func start_region(r: int) -> void:
 	SignalBus.region_changed.emit(r)
 	SignalBus.view_changed.emit("map")
 	save_game()
+	# 区域进入 CG（每存档每区域一次，地图就绪后叠加播放）
+	var cg_key = "enter_%d" % r
+	if r < GameData.CG_REGION_ENTER.size() and not _cg_seen(cg_key):
+		_mark_cg(cg_key)
+		save_game()
+		SignalBus.play_cg.emit([GameData.CG_REGION_ENTER[r]], "enter")
 
 ## 远征途中切换区域（全地图开放 · 测试模式）
 func switch_region(r: int) -> void:
@@ -333,7 +369,29 @@ func smelt_bag_item(index: int, affix_key: String) -> bool:
 	save_game()
 	return true
 
+## 词条当前强化等级（默认 1）
+static func affix_level_of(item: Dictionary, key: String) -> int:
+	if not item.get("affixes", []).has(key):
+		return 0
+	var lvs = item.get("affix_lv", {})
+	return maxi(1, int(lvs.get(key, 1))) if lvs is Dictionary else 1
+
+## 该词条能否锻打到目标装备上：新词条需有空位；同词条可强化（开关型除外，上限 Lv.3）
+## 返回 {"ok": bool, "why": String, "to_lv": int}
+func can_forge_to(item: Dictionary, affix_key: String) -> Dictionary:
+	if item.affixes.has(affix_key):
+		if GameData.NON_STACK_AFFIXES.has(affix_key):
+			return { "ok": false, "why": "开关型词条无法强化", "to_lv": 0 }
+		var lv = affix_level_of(item, affix_key)
+		if lv >= GameData.AFFIX_MAX_LEVEL:
+			return { "ok": false, "why": "该词条已达最高 Lv.%d" % GameData.AFFIX_MAX_LEVEL, "to_lv": 0 }
+		return { "ok": true, "why": "", "to_lv": lv + 1 }
+	if item.affixes.size() >= GameData.COMBAT["max_affix_total"]:
+		return { "ok": false, "why": "词条已达上限（%d 条）" % GameData.COMBAT["max_affix_total"], "to_lv": 0 }
+	return { "ok": true, "why": "", "to_lv": 1 }
+
 ## target: {"kind":"equip","slot":...} 或 {"kind":"bag","index":...}
+## 同词条锻打 → 词条强化（连击 Lv.2 = 连击数 +2，数值词条 ×等级）
 func forge_essence(essence_idx: int, target: Dictionary) -> bool:
 	if essence_idx < 0 or essence_idx >= essences.size():
 		return false
@@ -347,25 +405,30 @@ func forge_essence(essence_idx: int, target: Dictionary) -> bool:
 			it = bag[bi]
 	if it == null:
 		return false
-	if it.affixes.has(es.affix):
-		SignalBus.show_toast.emit("该装备已拥有此词条")
-		return false
-	if it.affixes.size() >= GameData.COMBAT["max_affix_total"]:
-		SignalBus.show_toast.emit("词条已达上限（%d 条）" % GameData.COMBAT["max_affix_total"])
+	var chk = can_forge_to(it, str(es.affix))
+	if not chk.ok:
+		SignalBus.show_toast.emit(str(chk.why))
 		return false
 	var cost = get_forge_cost()
 	if gold < cost:
 		SignalBus.show_toast.emit("金币不足（需要 %d）" % cost)
 		return false
 	gold -= cost
-	it.affixes.append(es.affix)
-	essences.remove_at(essence_idx)
+	if not (it.get("affix_lv") is Dictionary):
+		it["affix_lv"] = {}
 	var ad = GameData.AFFIXES.get(es.affix, {})
+	if it.affixes.has(es.affix):
+		it.affix_lv[es.affix] = int(chk.to_lv)
+		SignalBus.show_toast.emit("词条强化：「%s」提升至 Lv.%d — %s" % [ad.get("name", es.affix), int(chk.to_lv), GameData.affix_desc(str(es.affix), int(chk.to_lv))])
+	else:
+		it.affixes.append(es.affix)
+		it.affix_lv[es.affix] = 1
+		SignalBus.show_toast.emit("锻打成功：「%s」已附着到 %s" % [ad.get("name", es.affix), it.get("name", "装备")])
+	essences.remove_at(essence_idx)
 	_recalc_stats()
 	SignalBus.gold_changed.emit(gold)
 	SignalBus.bag_changed.emit(bag.duplicate())
 	SignalBus.equipment_changed.emit(str(it.get("slot", "weapon")), it)
-	SignalBus.show_toast.emit("锻打成功：「%s」已附着到 %s" % [ad.get("name", es.affix), it.get("name", "装备")])
 	Sfx.play("upgrade")
 	save_game()
 	return true
@@ -457,6 +520,15 @@ func enter_node(node_data: Dictionary) -> void:
 	if not can_enter_node(node_data):
 		SignalBus.show_toast.emit("这里已经探索过了")
 		return
+	# 区域 5 首领战前 CG（每存档一次），播完再进入战斗
+	if node_data.type == GameData.NodeType.BOSS and region == GameData.BIOMES.size() - 1 \
+			and not _cg_skip_once and not _cg_seen("pre_finalboss"):
+		_mark_cg("pre_finalboss")
+		_cg_pending_node = node_data
+		save_game()
+		SignalBus.play_cg.emit([GameData.CG_PRE_FINAL_BOSS], "pre_boss")
+		return
+	_cg_skip_once = false
 	# 进入节点前快照存档：无论何时退出游戏，都能从此处继续
 	hero_pos = node_data.id
 	save_game()
@@ -741,7 +813,22 @@ func skip_perk() -> void:
 
 func region_clear() -> void:
 	region_buff = 0.0
-	# 仅在里程碑区域（区域 2 / 区域 5）通关后提供天赋三选一
+	# 首领战后 CG：区域 1-4 每存档各一次；最终区域播终局三连 CG（每周目轮回都播）
+	var cgs: Array = []
+	if region < GameData.CG_REGION_CLEAR.size():
+		var key = "clear_%d" % region
+		if not _cg_seen(key):
+			_mark_cg(key)
+			cgs = [GameData.CG_REGION_CLEAR[region]]
+	elif region == GameData.BIOMES.size() - 1:
+		cgs = GameData.CG_FINALE.duplicate()
+	if cgs.size() > 0:
+		SignalBus.play_cg.emit(cgs, "region_clear")
+		return
+	_region_clear_after_cg()
+
+## CG 播完后的区域结算：里程碑区域（区域 2 / 区域 5）先天赋三选一
+func _region_clear_after_cg() -> void:
 	if not (region in GameData.PERK_MILESTONE_REGIONS):
 		_region_clear_continue()
 		return
@@ -981,6 +1068,7 @@ func save_game(force: bool = false) -> void:
 		"hero_name": hero_name,
 		"talents": talents,
 		"perks": perks,
+		"seen_cgs": seen_cgs,
 		"equipment": equipment,
 		"bag": bag,
 		"map_nodes": current_map.get("nodes", []),
@@ -1038,6 +1126,9 @@ func load_game(slot: int = -1) -> bool:
 	for p in parsed.get("perks", []):
 		if GameData.PERKS.has(str(p)) and not perks.has(str(p)):
 			perks.append(str(p))
+	seen_cgs.clear()
+	for k in parsed.get("seen_cgs", []):
+		seen_cgs.append(str(k))
 
 	equipment = {}
 	for slot_name in GameData.EQUIP_SLOTS:
@@ -1155,6 +1246,13 @@ func _restore_item(it: Dictionary) -> Dictionary:
 	for a in item.get("affixes", []):
 		affixes.append(str(a))
 	item["affixes"] = affixes
+	# 词条强化等级（锻打同词条获得）
+	var lvs = {}
+	var raw_lv = item.get("affix_lv", {})
+	if raw_lv is Dictionary:
+		for k in raw_lv:
+			lvs[str(k)] = clampi(int(raw_lv[k]), 1, GameData.AFFIX_MAX_LEVEL)
+	item["affix_lv"] = lvs
 	# 旧存档没有解说词条 → 现场补一份
 	if not item.has("lore") or not (item["lore"] is Array) or item["lore"].is_empty():
 		item["lore"] = LoreDataScript.compose_item_lore(item)

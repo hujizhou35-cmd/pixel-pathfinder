@@ -132,7 +132,8 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 
 	var shield = 0
 	if affixes.has("shielded"):
-		shield = roundi(st.hp * 0.25)
+		# 结界护盾随周目增强
+		shield = roundi(st.hp * 0.25 * (1.0 + cycle * GameData.COMBAT["cycle_enemy_shield_mult"]))
 
 	return {
 		"name": name,
@@ -174,6 +175,8 @@ static func setup_combat(region: int, cycle: int, elite: bool, boss: bool, foes:
 
 	var stats = GameState.get_player_stats()
 	var shield = _shield_gain(stats, stats.shield_start)
+	# 开战护盾同样受护盾上限约束（最大生命 × 40%）
+	shield = mini(shield, roundi(GameState.max_hp * GameData.COMBAT["shield_cap_pct"]))
 	if shield > 0:
 		SignalBus.combat_log_message.emit("壁垒：战斗开始获得 %d 护盾" % shield, "system")
 

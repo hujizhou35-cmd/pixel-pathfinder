@@ -72,6 +72,9 @@ static func calculate_total_stats(equipment: Dictionary) -> Dictionary:
 		"shield2atk": false,
 		"atk2shield": false,
 		"dodge_chance": 0,
+		# 连击体系（词条/天赋驱动）
+		"multihit": 0,
+		"crit_combo": 0,
 		# 百分比累积（最后统一应用）
 		"atk_pct": 0,
 		"def_pct": 0,
@@ -112,43 +115,49 @@ static func calculate_total_stats(equipment: Dictionary) -> Dictionary:
 		# +5 独特
 		if it.level >= 5:
 			match it.key:
-				"sword": S.kill_shield = 8
+				"sword": S.kill_shield = 5
 				"bow": S.first_double = true
 				"axe": S.axe_bonus = 0.35
 				"armor": S.full_block_chance = 25
-				"helmet": S.shield_start += 12
+				"helmet": S.shield_start += 8
 				"pants": S.regen += 3
 				"boots": S.dodge_chance += 15
 				"amulet": S.battle_heal += 0.15
 
-		# 词条
+		# 词条（数值型词条按锻打强化等级 Lv 倍增；开关型不受等级影响）
 		for a in it.affixes:
+			var lv = 1
+			var lvs = it.get("affix_lv", {})
+			if lvs is Dictionary:
+				lv = maxi(1, int(lvs.get(a, 1)))
 			match a:
-				"crit": S.crit += 10
-				"critdmg": S.crit_dmg += 40
-				"swift": S.extra_hit += 15
-				"pierce": S.atk_pct += 12
-				"chain": S.splash += 30
-				"lifesteal": S.lifesteal += 12
-				"stun": S.stun_chance += 12
-				"burn": S.burn_chance += 20
-				"combo": S.combo_dmg += 25
+				"crit": S.crit += 10 * lv
+				"critdmg": S.crit_dmg += 40 * lv
+				"multihit": S.multihit += lv
+				"critcombo": S.crit_combo += lv
+				"swift": S.extra_hit += 15 * lv
+				"pierce": S.atk_pct += 12 * lv
+				"chain": S.splash += 30 * lv
+				"lifesteal": S.lifesteal += 12 * lv
+				"stun": S.stun_chance += 12 * lv
+				"burn": S.burn_chance += 20 * lv
+				"combo": S.combo_dmg += 25 * lv
 				"focus": S.has_focus = true
-				"execute": S.execute_bonus += 40
-				"block": S.block_chance += 10
-				"bulwark": S.shield_start += 10
-				"regen": S.regen += 2
-				"stone": S.dmg_reduction += 10
-				"shieldm": S.shield_gain_pct += 40
-				"thornsp": S.thorns_pct += 20
-				"greed": S.gold_pct += 25
-				"fortune": S.loot_pct += 15
-				"haggle": S.discount += 15
+				"execute": S.execute_bonus += 40 * lv
+				"block": S.block_chance += 10 * lv
+				"bulwark": S.shield_start += 6 * lv
+				"regen": S.regen += 2 * lv
+				"stone": S.dmg_reduction += 10 * lv
+				"shieldm": S.shield_gain_pct += 20 * lv
+				"thornsp": S.thorns_pct += 20 * lv
+				"greed": S.gold_pct += 25 * lv
+				"fortune": S.loot_pct += 15 * lv
+				"haggle": S.discount += 15 * lv
 				"alchemy":
-					S.potion_bonus_pct += 15
+					S.potion_bonus_pct += 15 * lv
 					S.potion_cd_reduce += 1
 				"swiftbash": S.bash_fast = true
-				"bashcd": S.bash_cd_reduce += 1
+				"bashcd": S.bash_cd_reduce += lv
 				"shield2atk": S.shield2atk = true
 				"atk2shield": S.atk2shield = true
 
@@ -214,6 +223,8 @@ static func _apply_fx(S: Dictionary, fx: Dictionary) -> void:
 			"bash_fast": S.bash_fast = true
 			"bash_cd_reduce": S.bash_cd_reduce += v
 			"first_double": S.first_double = true
+			"crit_combo": S.crit_combo += v
+			"multihit": S.multihit += v
 
 # ------------------------------------------------------------
 # 套装：身上 2/3 件同前缀装备激活套装效果（六个槽位都计入）
@@ -355,10 +366,12 @@ static func format_upgrade_preview(item: Dictionary) -> String:
 static func weapon_class_desc(key: String) -> String:
 	match key:
 		"axe": return "斧：伤害 ×1.55，攻击后冷却 1 回合（空档可防御蓄势）；盾击后手"
-		"bow": return "弓：每回合 2 箭起步，每箭 ×0.62 独立触发特效；暴击使本场战斗连击数 +1；盾击后手"
+		"bow": return "弓：每回合 2 箭起步，每箭 ×0.62 独立触发特效（连击/贯连词条可加箭）；盾击后手"
 		"sword": return "剑：标准攻击无冷却，且盾击先手发动（剑专属）"
 	return ""
 
+## 装备说明行（信息结构：核心战斗信息在前，套装效果挪到最后）
+## 顺序：职业 → 基底特性 → 元素 → 词条(含强化Lv) → +3被动 → +5独特 → 强化投入 → 套装
 static func format_affixes(item: Dictionary) -> Array:
 	var lines = []
 	var wc = weapon_class_desc(str(item.get("key", "")))
@@ -371,14 +384,15 @@ static func format_affixes(item: Dictionary) -> Array:
 	if elem != "":
 		var ed = GameData.ELEMENTS.get(elem, {})
 		lines.append("〔%s〕克制时伤害×1.3 · 触发「%s」: %s" % [GameData.element_name(elem), ed.get("proc_name", ""), ed.get("proc_desc", "")])
-	var pfx = str(item.get("prefix", ""))
-	if pfx != "" and GameData.SET_BONUSES.has(pfx):
-		var sb = GameData.SET_BONUSES[pfx]
-		lines.append("✪ 套装「%s·%s」 2件: %s / 3件: %s" % [pfx, sb.name, sb.two.desc, sb.three.desc])
 
 	for a in item.affixes:
 		var data = GameData.AFFIXES.get(a, {})
-		lines.append("◆ %s · %s" % [data.get("name", a), data.get("desc", "")])
+		var lv = 1
+		var lvs = item.get("affix_lv", {})
+		if lvs is Dictionary:
+			lv = maxi(1, int(lvs.get(a, 1)))
+		var lv_tag = (" Lv.%d" % lv) if lv > 1 else ""
+		lines.append("◆ %s%s · %s" % [data.get("name", a), lv_tag, GameData.affix_desc(str(a), lv)])
 
 	if item.level >= 3:
 		lines.append("★ 被动(已解锁): %s" % SLOT_PASSIVE_DESC.get(str(item.slot), ""))
@@ -393,5 +407,11 @@ static func format_affixes(item: Dictionary) -> Array:
 	var invested: int = int(item.get("invested", 0))
 	if invested > 0:
 		lines.append("◇ 已投入强化 %d 金 · 出售时返还 50%%（+%d 金）" % [invested, roundi(invested * GameData.COMBAT["sell_refund_pct"])])
+
+	# 套装信息放最后（不挡核心信息）
+	var pfx = str(item.get("prefix", ""))
+	if pfx != "" and GameData.SET_BONUSES.has(pfx):
+		var sb = GameData.SET_BONUSES[pfx]
+		lines.append("✪ 套装「%s·%s」 2件: %s / 3件: %s" % [pfx, sb.name, sb.two.desc, sb.three.desc])
 
 	return lines

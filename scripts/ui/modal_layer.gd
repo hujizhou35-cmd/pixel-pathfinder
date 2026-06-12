@@ -679,7 +679,9 @@ func _build_help(c: VBoxContainer) -> void:
 		"◆ 战斗节点可先侦察：怪物数量、风格、词条、精确数值一目了然。",
 		"◆ 战斗：攻击[1] · 盾击[2]（冷却3·默认后手）· 防御[3]（冷却2）· 药水[4]（冷却3）。",
 		"◆ 先后手：普攻/防御/药水先手；盾击后手（剑/疾盾词条豁免）；「先手」怪总是抢先。",
-		"◆ 武器差异：剑盾击先手 / 斧 ×1.55 攻击后冷却 / 弓暴击叠箭（越打越多）。",
+		"◆ 武器差异：剑盾击先手 / 斧 ×1.55 攻击后冷却 / 弓多箭齐发（连击/贯连词条可加箭）。",
+		"◆ 护盾有上限：总量不超过最大生命 40%，详见图鉴「机制」页。",
+		"◆ 锻打强化：同词条精华锻打到已有该词条的装备上 → 词条升级（最高 Lv.3，数值翻倍/三倍）。",
 		"◆ 元素：闪电克森林·森林克大地·大地克寒冰·寒冰克焰火·焰火克闪电，克制 ×1.3。",
 		"◆ 装备六部位：武器/铠甲/头盔/裤子/鞋/配饰；同前缀 2/3 件成套装；+3 被动 +5 独特。",
 		"◆ 新存档：给角色起名并分配 10 点天赋；通关区域 2 / 区域 5 后各三选一天赋词条（周目同样），上限 5 条、超出可替换。",
@@ -966,7 +968,7 @@ func _build_stats(c: VBoxContainer) -> void:
 			l.custom_minimum_size = Vector2(500, 0)
 			v.add_child(l)
 
-	_text(c, "战斗公式：防御每点减伤 0.8 · 盾击护盾 = 6 + 防御×1.2 · 防御姿态护盾 = 7 + 防御×1.6", 12, UITheme.C_TEXT_DIM)
+	_text(c, "战斗公式：防御每点减伤 0.8 · 盾击护盾 = 4 + 防御×0.5 · 防御姿态护盾 = 5 + 防御×0.6 · 护盾上限 = 最大生命 40%", 12, UITheme.C_TEXT_DIM)
 
 	var r = _btn_row(c)
 	_btn(r, "关闭 [Esc]", close, 150.0)
@@ -980,7 +982,7 @@ func _build_codex(c: VBoxContainer) -> void:
 
 	# 分页按钮
 	var tabs = _btn_row(c)
-	var tab_defs = [["equip", "装备库"], ["affix", "词条·套装"], ["perk", "天赋"], ["monster", "怪物"], ["boss", "首领"], ["event", "事件"], ["element", "元素·药水"]]
+	var tab_defs = [["equip", "装备库"], ["affix", "词条·套装"], ["mech", "机制"], ["perk", "天赋"], ["monster", "怪物"], ["boss", "首领"], ["event", "事件"], ["element", "元素·药水"]]
 	for td in tab_defs:
 		var tkey = td[0]
 		var b = _btn(tabs, td[1], func():
@@ -1002,6 +1004,7 @@ func _build_codex(c: VBoxContainer) -> void:
 	match tab:
 		"equip":   _codex_equip(v)
 		"affix":   _codex_affix(v)
+		"mech":    _codex_mechanics(v)
 		"perk":    _codex_perks(v)
 		"monster": _codex_monsters(v)
 		"boss":    _codex_bosses(v)
@@ -1041,7 +1044,7 @@ func _codex_equip(v: VBoxContainer) -> void:
 	var wc_card = _codex_card(v, "武器职业差异（含先后手）", UITheme.C_GOLD)
 	_codex_line(wc_card, "剑", "标准攻击无冷却，盾击先手发动（剑专属） — 均衡", UITheme.C_GREEN)
 	_codex_line(wc_card, "斧", "伤害 ×1.55，攻击后冷却 1 回合 — 配合蓄势/处决打一击流", UITheme.C_GREEN)
-	_codex_line(wc_card, "弓", "每回合 2 箭起步、每箭 ×0.62 独立触发特效；暴击使本场战斗连击数 +1（上限 +4） — 连击/吸血流", UITheme.C_GREEN)
+	_codex_line(wc_card, "弓", "每回合 2 箭起步、每箭 ×0.62 独立触发特效；搭配「连击/贯连」词条可不断加箭 — 连击/吸血流", UITheme.C_GREEN)
 
 	# 按基底分组列出 100 件
 	var last_base = ""
@@ -1081,7 +1084,7 @@ func _codex_equip(v: VBoxContainer) -> void:
 		row.add_child(nl)
 
 func _codex_affix(v: VBoxContainer) -> void:
-	_codex_line(v, "", "稀有度词条：稀有 1 条 · 史诗 2 条 · 传说 3 条；熔炼史诗+装备可萃取词条精华，锻打到其他装备（上限 4 条）。", UITheme.C_TEXT)
+	_codex_line(v, "", "稀有度词条：稀有 1 条 · 史诗 2 条 · 传说 3 条；熔炼史诗+装备可萃取词条精华，锻打到其他装备（上限 4 条）。同词条锻打可强化等级（最高 Lv.3，数值按等级倍增），详见「机制」页。", UITheme.C_TEXT)
 	var kinds = { "off": "进攻词条", "def": "防御词条", "exp": "探索词条" }
 	for kind in ["off", "def", "exp"]:
 		var card = _codex_card(v, kinds[kind], Color("#bd6fff"))
@@ -1102,6 +1105,54 @@ func _codex_affix(v: VBoxContainer) -> void:
 		if GameData.SET_BONUSES.has(p):
 			var sb = GameData.SET_BONUSES[p]
 			_codex_line(set_card, "%s·%s" % [p, sb.name], "2件: %s ／ 3件: %s" % [sb.two.desc, sb.three.desc])
+
+# ------------------------------------------------------------
+# 机制总览：先后手判定 / 行动结算 / 护盾 / 连击 / 词条互动（与代码逻辑一一对应）
+# ------------------------------------------------------------
+func _codex_mechanics(v: VBoxContainer) -> void:
+	var C = GameData.COMBAT
+	_codex_line(v, "", "本页总结所有效果的精确触发条件与相互作用判定，与游戏内部结算完全一致。", UITheme.C_TEXT)
+
+	var order_card = _codex_card(v, "一、先后手判定（每回合的行动顺序）", UITheme.C_GOLD)
+	_codex_line(order_card, "快动作", "攻击 / 防御 / 药水 都是「快动作」：只有〈先手〉风格的怪物会抢在你之前行动，其余怪物在你之后行动。", UITheme.C_GREEN)
+	_codex_line(order_card, "慢动作", "盾击默认是「慢动作」：你按下盾击后，所有存活敌人会先行动一轮，然后盾击才结算。", Color("#ff9b8a"))
+	_codex_line(order_card, "盾击转先手", "满足任意一条即可让盾击变成快动作：① 装备剑（剑专属特性）② 任意装备带「疾盾」词条 ③ 拥有「盾击大师」天赋。三者效果相同、不叠加。", UITheme.C_GREEN)
+	_codex_line(order_card, "先手怪", "〈先手〉怪（灰狼/霜狼/火元素/幽魂）每回合都先于你的快动作行动；若你使用慢动作盾击，它们也只行动一次（不会动两轮）。")
+	_codex_line(order_card, "坚守怪", "〈坚守〉怪（雪人/木乃伊/构造体）在第 1、4、7…回合举盾防御（获得护盾，该回合不攻击），其余回合正常攻击。")
+	_codex_line(order_card, "盾击怪", "〈盾击〉怪（守护者/沙丘劫匪）每次攻击后额外获得护盾（攻击 ×0.6，随周目增强）。")
+	_codex_line(order_card, "眩晕优先", "被「震慑」眩晕的怪物轮到行动时直接跳过（含先手怪的抢先行动）。")
+
+	var act_card = _codex_card(v, "二、行动结算细节", UITheme.C_GOLD)
+	_codex_line(act_card, "攻击", "剑：1 次全额攻击，无冷却。斧：1 次 ×%.2f 攻击，攻击后冷却 %d 回合。弓：%d 箭起步，每箭 ×%.2f，且每箭独立判定暴击与命中特效。" % [C.axe_dmg_mult, C.axe_cooldown, C.bow_hits, C.bow_hit_mult])
+	_codex_line(act_card, "盾击", "对单体造成 ×%.2f 伤害并获得护盾（%d + 防御×%.1f），冷却 %d 回合；「盾势」词条每级冷却 -1（最低 1）。" % [C.skill_dmg_mult, C.base_skill_shield, C.skill_shield_def_mult, C.skill_cooldown])
+	_codex_line(act_card, "防御", "获得护盾（%d + 防御×%.1f），冷却 %d 回合；带「蓄势」词条时每次防御 +1 层（最多 3 层），下次攻击每层 +30%% 伤害，攻击后清零。" % [C.base_def_shield, C.def_shield_def_mult, C.defend_cooldown])
+	_codex_line(act_card, "药水", "恢复 40%% 最大生命，战斗内冷却 %d 回合；「药理」词条恢复 +15%%/级 且冷却 -1。" % C.potion_cooldown)
+	_codex_line(act_card, "伤害公式", "你受到的伤害 = 敌攻 × 元素系数 − 防御×%.1f，再依次结算：闪避 → 完全格挡 → 减伤%% → 减半格挡 → 护盾吸收 → 扣血。" % C.def_dmg_reduction)
+
+	var shield_card = _codex_card(v, "三、护盾体系（已削弱）", Color("#5ab4e8"))
+	_codex_line(shield_card, "上限", "你的护盾总量永远不会超过最大生命 × %d%%，所有来源共用此上限（超出部分浪费）。" % roundi(C.shield_cap_pct * 100), Color("#ff9b8a"))
+	_codex_line(shield_card, "来源", "防御（%d+防御×%.1f）/ 盾击（%d+防御×%.1f）/「岩盾」触发（%d+防御×%.1f）/「壁垒」开战 6/级 / 头盔+5 开战 8 / 长剑+5 击杀 5 / 攻转盾（伤害 15%%）。" % [C.base_def_shield, C.def_shield_def_mult, C.base_skill_shield, C.skill_shield_def_mult, int(C.earth_shield_base), C.earth_shield_def_mult])
+	_codex_line(shield_card, "加成", "「盾魂」词条（+20%/级）、守护之魂天赋（+15%）、远古套装（+15%）只放大单次获取量，不能突破上限。")
+	_codex_line(shield_card, "穿透", "怪物「穿甲」词条的攻击直接无视你的护盾；你的「雷击」元素触发同样无视敌方护盾。")
+	_codex_line(shield_card, "敌方护盾", "怪物护盾随周目 +%d%%/周目；先打掉护盾才会掉血（灼烧无视护盾直接烧血）。" % roundi(C.cycle_enemy_shield_mult * 100))
+
+	var combo_card = _codex_card(v, "四、连击体系（词条驱动）", Color("#bd6fff"))
+	_codex_line(combo_card, "连击数", "「连击」词条每级使连击数 +1：弓多射一箭（全额 ×%.2f）；剑/斧追加一次 ×%.1f 伤害的攻击。" % [C.bow_hit_mult, C.extra_hit_dmg_mult])
+	_codex_line(combo_card, "贯连", "「贯连」词条 / 「连击之道」天赋：本次行动每出现一次暴击，本场战斗连击数 +1（每级 +1，上限 +%d）。战斗结束清零。注意：弓不再自带此效果，需要自行搭配。" % C.bow_combo_cap, Color("#ff9b8a"))
+	_codex_line(combo_card, "迅捷", "「迅捷」词条是独立的概率追击（15%%/级，×%.1f 伤害），与连击数互不影响，可叠加。" % C.extra_hit_dmg_mult)
+	_codex_line(combo_card, "连环", "「连环」词条让第 2 箭/追加攻击伤害 +25%/级，放大一切多段攻击。")
+	_codex_line(combo_card, "触发关系", "每一箭/每次追击都独立判定：暴击、元素触发（%d%%+触发率加成）、震慑、燃焰、吸血——攻击段数越多，特效期望越高。" % roundi(C.elem_proc_chance))
+
+	var forge_card = _codex_card(v, "五、熔炼与锻打（词条强化）", Color("#e8a8ff"))
+	_codex_line(forge_card, "熔炼", "史诗+装备可销毁并萃取其一条词条为「精华」（精华袋上限 %d）。" % C.essence_cap)
+	_codex_line(forge_card, "锻打新词条", "把精华打到没有该词条的装备上 → 新增词条（单件上限 %d 条）。" % C.max_affix_total)
+	_codex_line(forge_card, "同词条强化", "把精华打到已有同词条的装备上 → 词条升级（最高 Lv.%d）：数值词条按等级倍增（如连击 Lv.2 = 连击数 +2，精准 Lv.2 = 暴击率 +20%%）。" % GameData.AFFIX_MAX_LEVEL, UITheme.C_GREEN)
+	_codex_line(forge_card, "不可强化", "开关型词条（蓄势/疾盾/盾转攻/攻转盾）只有开或关，无法升级。")
+
+	var stack_card = _codex_card(v, "六、叠加规则速查", UITheme.C_GOLD)
+	_codex_line(stack_card, "可叠加", "同名词条出现在不同装备上时数值相加（如两件「精准」= 暴击率 +20%）；天赋、套装、基底特性与词条全部相加。")
+	_codex_line(stack_card, "百分比", "攻击/防御/生命的百分比加成（穿透、套装、天赋）先合计再统一乘算一次。")
+	_codex_line(stack_card, "元素", "武器克制敌人元素 ×1.3（符文 3 件套翻倍加成），被克 ×0.8；铠甲元素同理影响你的受击。")
 
 func _codex_perks(v: VBoxContainer) -> void:
 	_codex_line(v, "", "通关区域 2 与区域 5 后，各可从随机三条天赋词条中选择一条（周目循环中同样）。词条上限 %d 条，超出需选择替换。开局另有 %d 点天赋点分配给生命/力量/坚韧/敏捷。" % [GameData.PERK_CAP, GameData.TALENT_POINTS], UITheme.C_TEXT)
@@ -1447,22 +1498,27 @@ func _forge_target_row(parent: Control, it: Dictionary, tag: String, es: Diction
 	parent.add_child(row)
 	var rc = UITheme.rarity_color(it.rarity)
 	var l = Label.new()
-	l.text = "[%s] %s（词条 %d/%d）" % [tag, it.get("name", it.base_name), it.affixes.size(), GameData.COMBAT["max_affix_total"]]
+	var chk = GameState.can_forge_to(it, str(es.affix))
+	var note = ""
+	if it.affixes.has(es.affix):
+		var cur_lv = GameState.affix_level_of(it, str(es.affix))
+		note = "（已有该词条 Lv.%d%s）" % [cur_lv, ("，可强化至 Lv.%d" % int(chk.to_lv)) if chk.ok else ""]
+	l.text = "[%s] %s（词条 %d/%d）%s" % [tag, it.get("name", it.base_name), it.affixes.size(), GameData.COMBAT["max_affix_total"], note]
 	l.add_theme_font_size_override("font_size", 14)
 	l.add_theme_color_override("font_color", rc)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size = Vector2(340, 0)
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(l)
-	var ok = not it.affixes.has(es.affix) and it.affixes.size() < GameData.COMBAT["max_affix_total"] and GameState.gold >= cost
-	var b = _btn(row, "锻打", func():
+	var btn_text = "强化" if (it.affixes.has(es.affix) and chk.ok) else "锻打"
+	var b = _btn(row, btn_text, func():
 		if GameState.forge_essence(ei, target):
 			close()
 	, 90.0)
-	b.disabled = not ok
-	if it.affixes.has(es.affix):
-		b.tooltip_text = "已拥有该词条"
-	elif it.affixes.size() >= GameData.COMBAT["max_affix_total"]:
-		b.tooltip_text = "词条已达上限"
+	b.disabled = not chk.ok or GameState.gold < cost
+	if not chk.ok:
+		b.tooltip_text = str(chk.why)
 	elif GameState.gold < cost:
 		b.tooltip_text = "金币不足"
+	elif it.affixes.has(es.affix):
+		b.tooltip_text = "同词条强化：%s" % GameData.affix_desc(str(es.affix), int(chk.to_lv))

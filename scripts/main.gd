@@ -15,6 +15,7 @@ const HudPanelScript = preload("res://scripts/ui/hud_panel.gd")
 const ModalLayerScript = preload("res://scripts/ui/modal_layer.gd")
 const WeatherScript = preload("res://scripts/fx/weather.gd")
 const CombatStateScript = preload("res://scripts/combat/combat_state.gd")
+const CGLayerScript = preload("res://scripts/ui/cg_layer.gd")
 
 var shake_root: Control
 var background: TextureRect
@@ -25,6 +26,7 @@ var combat_view: CombatView
 var hud: HudPanel
 var modal_layer: ModalLayer
 var toast_layer: VBoxContainer
+var cg_layer: CGLayer
 
 var combat_node: CombatStateMachine = null
 var _shake_amount: float = 0.0
@@ -84,6 +86,10 @@ func _build_tree() -> void:
 	toast_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(toast_layer)
 
+	# 剧情 CG 层（最顶层，播放时屏蔽其它输入）
+	cg_layer = CGLayerScript.new()
+	add_child(cg_layer)
+
 func _connect_signals() -> void:
 	SignalBus.view_changed.connect(_show_view)
 	SignalBus.show_toast.connect(_show_toast)
@@ -92,6 +98,7 @@ func _connect_signals() -> void:
 	SignalBus.combat_started.connect(_on_combat_started)
 	SignalBus.combat_ended.connect(_on_combat_ended)
 	SignalBus.map_generated.connect(_on_map_generated)
+	SignalBus.play_cg.connect(func(ids, tag): cg_layer.play(ids, tag))
 
 func _on_map_generated() -> void:
 	if _current_view == "map":
@@ -203,6 +210,8 @@ func _show_toast(message: String) -> void:
 # 快捷键
 # ------------------------------------------------------------
 func _unhandled_input(event: InputEvent) -> void:
+	if cg_layer != null and cg_layer.is_playing():
+		return   # CG 播放期间屏蔽全局快捷键（CG 层自行处理空格/回车）
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_ESCAPE:

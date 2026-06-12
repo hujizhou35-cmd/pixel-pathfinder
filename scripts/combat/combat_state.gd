@@ -71,11 +71,30 @@ func _resolve_target(target_idx: int) -> Dictionary:
 		return { "index": target_idx, "enemy": enemies[target_idx] }
 	return _get_first_alive_enemy(enemies)
 
-## 护盾获取统一入口
+## 护盾获取统一入口（仅计算量，不入账）
 func _shield_gain(stats: Dictionary, base: float) -> int:
 	if base <= 0:
 		return 0
 	return maxi(1, roundi(base * (1.0 + stats.get("shield_gain_pct", 0) / 100.0)))
+
+## 玩家护盾入账统一入口：应用盾魂等加成后，总量不超过最大生命 × 40%
+## 返回实际获得量（触顶时被截断）
+func _grant_player_shield(stats: Dictionary, base: float) -> int:
+	var amt = _shield_gain(stats, base)
+	if amt <= 0:
+		return 0
+	var cap = maxi(1, roundi(GameState.max_hp * GameData.COMBAT["shield_cap_pct"]))
+	var before = int(combat_data.shield)
+	combat_data.shield = mini(cap, before + amt)
+	var gained = combat_data.shield - before
+	SignalBus.shield_changed.emit(combat_data.shield)
+	if gained < amt:
+		SignalBus.combat_log_message.emit("护盾已达上限（最大生命的 %d%%）" % roundi(GameData.COMBAT["shield_cap_pct"] * 100), "system")
+	return gained
+
+## 怪物护盾随周目增强的系数
+func _enemy_shield_mult() -> float:
+	return 1.0 + GameState.cycle * GameData.COMBAT["cycle_enemy_shield_mult"]
 
 # ------------------------------------------------------------
 # 先后手机制
@@ -124,12 +143,14 @@ func player_attack(target_idx: int = -1) -> void:
 	var weapon = GameState.equipment.get("weapon")
 	var wkey = weapon.get("key", "sword") if weapon else "sword"
 
-	var hits = 1
+	# 连击数 = 连击词条(multihit) + 贯连/连击之道积累的连击计数（本场战斗有效）
+	var bonus_hits = int(stats.get("multihit", 0)) + int(combat_data.get("bow_combo", 0))
+	var hits = 1 + bonus_hits
 	var per_mult = 1.0
 	match wkey:
 		"bow":
-			# 弓：基础箭数 + 本场战斗暴击积累的连击数
-			hits = GameData.COMBAT["bow_hits"] + int(combat_data.get("bow_combo", 0))
+			# 弓：基础 2 箭 + 连击数（每箭都是完整 ×0.62 一箭）
+			hits = GameData.COMBAT["bow_hits"] + bonus_hits
 			per_mult = GameData.COMBAT["bow_hit_mult"]
 		"axe":
 			per_mult = GameData.COMBAT["axe_dmg_mult"]
@@ -162,28 +183,32 @@ func player_attack(target_idx: int = -1) -> void:
 		var hm = per_mult * base_extra
 		if h > 0:
 			hm *= 1.0 + stats.combo_dmg / 100.0
+			# 非弓武器的追加连击按 80% 伤害结算（弓的每箭本就是独立一箭）
+			if wkey != "bow":
+				hm *= GameData.COMBAT["extra_hit_dmg_mult"]
 		var dealt = _do_hit(target.index, hm, stats, wkey)
 		total_dmg += dealt
 		if h == 0:
 			first_dmg = dealt
 
-	# 弓：本次行动每次暴击 → 本场战斗连击数 +1（有上限）
-	if wkey == "bow":
+	# 贯连词条 / 连击之道天赋：本次行动每次暴击 → 本场战斗连击数 +Lv（有上限）
+	# （不再是弓的自带能力，需玩家自行搭配词条或天赋）
+	var cc = int(stats.get("crit_combo", 0))
+	if cc > 0:
 		var crits = int(combat_data.get("crits_this_action", 0))
 		if crits > 0:
 			var cap = int(GameData.COMBAT["bow_combo_cap"])
 			var before = int(combat_data.get("bow_combo", 0))
-			combat_data.bow_combo = mini(cap, before + crits)
+			combat_data.bow_combo = mini(cap, before + crits * cc)
 			if combat_data.bow_combo > before:
-				SignalBus.combat_log_message.emit("箭无虚发！连击数 +%d（本场战斗每轮 %d 箭）" % [combat_data.bow_combo - before, GameData.COMBAT["bow_hits"] + combat_data.bow_combo], "crit")
+				SignalBus.combat_log_message.emit("贯连触发！连击数 +%d（本场战斗累计 +%d）" % [combat_data.bow_combo - before, combat_data.bow_combo], "crit")
 				SignalBus.bow_combo_changed.emit(combat_data.bow_combo)
 
-	# 攻转盾词条：按总伤害 30% 获得护盾
+	# 攻转盾词条：按总伤害 15% 获得护盾（受护盾上限约束）
 	if stats.get("atk2shield", false) and total_dmg > 0:
-		var asg = _shield_gain(stats, total_dmg * 0.30)
-		combat_data.shield += asg
-		SignalBus.shield_changed.emit(combat_data.shield)
-		SignalBus.combat_log_message.emit("攻转盾：获得 %d 护盾" % asg, "system")
+		var asg = _grant_player_shield(stats, total_dmg * 0.15)
+		if asg > 0:
+			SignalBus.combat_log_message.emit("攻转盾：获得 %d 护盾" % asg, "system")
 
 	# 斧攻击冷却（攻击后下回合不可攻击 → 防御蓄势的节奏）
 	if wkey == "axe":
@@ -311,9 +336,7 @@ func _apply_elem_proc(proc: String, e: Dictionary, t_idx: int, stats: Dictionary
 			_ignite(e, stats, t_idx)
 			SignalBus.combat_log_message.emit("「%s」触发：%s 燃烧起来了！" % [pname, e.name], "crit")
 		"earth":
-			var sg = _shield_gain(stats, 6.0 + stats.def * 0.8)
-			combat_data.shield += sg
-			SignalBus.shield_changed.emit(combat_data.shield)
+			var sg = _grant_player_shield(stats, GameData.COMBAT["earth_shield_base"] + stats.def * GameData.COMBAT["earth_shield_def_mult"])
 			SignalBus.combat_log_message.emit("「%s」触发：获得 %d 护盾" % [pname, sg], "system")
 
 func _ignite(e: Dictionary, stats: Dictionary, idx: int) -> void:
@@ -355,10 +378,8 @@ func player_skill(target_idx: int = -1) -> void:
 		_do_hit(target.index, dmg_mult, stats, wkey)
 		Sfx.play("skill")
 
-		var shield_amt = _shield_gain(stats, shield_base)
-		combat_data.shield += shield_amt
+		var shield_amt = _grant_player_shield(stats, shield_base)
 		combat_data.skill_cooldown = maxi(1, int(GameData.COMBAT["skill_cooldown"]) - int(stats.get("bash_cd_reduce", 0)))
-		SignalBus.shield_changed.emit(combat_data.shield)
 		SignalBus.skill_cooldown_changed.emit(combat_data.skill_cooldown)
 		SignalBus.combat_log_message.emit("盾击余势：获得 %d 点护盾" % shield_amt, "player")
 
@@ -375,10 +396,8 @@ func player_defend() -> void:
 	if not _pre_strike(false):
 		return
 	var stats = GameState.get_player_stats()
-	var shield_amt = _shield_gain(stats, GameData.COMBAT["base_def_shield"] + stats.def * GameData.COMBAT["def_shield_def_mult"])
-	combat_data.shield += shield_amt
+	var shield_amt = _grant_player_shield(stats, GameData.COMBAT["base_def_shield"] + stats.def * GameData.COMBAT["def_shield_def_mult"])
 	combat_data.cooldowns["defend"] = GameData.COMBAT["defend_cooldown"] + 1
-	SignalBus.shield_changed.emit(combat_data.shield)
 	SignalBus.combat_log_message.emit("你举盾固守：+%d 护盾" % shield_amt, "player")
 	# 蓄势词条：防御积累爆发
 	if stats.get("has_focus", false) and combat_data.get("focus", 0) < 3:
@@ -496,11 +515,11 @@ func _process_enemy_action(e, idx: int) -> void:
 		if _boss_trait_action(e, idx):
 			return
 
-	# 坚守风格：周期性举盾（第 1、4、7…回合防御，跳过攻击）
+	# 坚守风格：周期性举盾（第 1、4、7…回合防御，跳过攻击；护盾随周目增强）
 	if str(e.get("style", "normal")) == "guard":
 		e.guard_turn = int(e.get("guard_turn", 0)) + 1
 		if (e.guard_turn - 1) % 3 == 0:
-			var gs = maxi(2, roundi(e.maxhp * 0.12))
+			var gs = maxi(2, roundi(e.maxhp * 0.12 * _enemy_shield_mult()))
 			e.shield += gs
 			SignalBus.enemy_shield_changed.emit(idx, e.shield)
 			SignalBus.combat_log_message.emit("%s 举盾坚守，获得 %d 护盾（本回合不攻击）" % [e.name, gs], "enemy")
@@ -527,9 +546,9 @@ func _process_enemy_action(e, idx: int) -> void:
 			SignalBus.enemy_hp_changed.emit(idx, e.hp, e.maxhp)
 			SignalBus.combat_log_message.emit("%s 嗜血吸取了 %d 生命" % [e.name, vh], "enemy")
 
-	# 盾击风格：攻击同时获得护盾
+	# 盾击风格：攻击同时获得护盾（护盾随周目增强）
 	if str(e.get("style", "normal")) == "bash" and e.hp > 0:
-		var bs = maxi(1, roundi(float(e.atk) * 0.6))
+		var bs = maxi(1, roundi(float(e.atk) * 0.6 * _enemy_shield_mult()))
 		e.shield += bs
 		SignalBus.enemy_shield_changed.emit(idx, e.shield)
 		SignalBus.combat_log_message.emit("%s 盾击姿态：获得 %d 护盾" % [e.name, bs], "enemy")
@@ -548,7 +567,7 @@ func _boss_trait_action(e, idx: int) -> bool:
 
 	if traits.has("shield_phase") and not T.shield_used and e.hp <= e.maxhp * 0.5:
 		T.shield_used = true
-		var s = roundi(e.maxhp * 0.25)
+		var s = roundi(e.maxhp * 0.25 * _enemy_shield_mult())
 		e.shield += s
 		SignalBus.enemy_shield_changed.emit(idx, e.shield)
 		SignalBus.combat_log_message.emit("%s 凝聚岩壳进入护盾阶段！+%d 护盾" % [e.name, s], "enemy")
@@ -661,10 +680,9 @@ func _kill_check() -> void:
 				GameState.run_stats.elite_kills += 1
 			SignalBus.enemy_defeated.emit(i)
 			if stats.kill_shield > 0:
-				var ks = _shield_gain(stats, stats.kill_shield)
-				combat_data.shield += ks
-				SignalBus.shield_changed.emit(combat_data.shield)
-				SignalBus.combat_log_message.emit("长剑饮血：击杀获得 %d 护盾" % ks, "system")
+				var ks = _grant_player_shield(stats, stats.kill_shield)
+				if ks > 0:
+					SignalBus.combat_log_message.emit("长剑饮血：击杀获得 %d 护盾" % ks, "system")
 			SignalBus.combat_log_message.emit("%s 被击败！" % e.name, "system")
 
 func _check_combat_end() -> bool:

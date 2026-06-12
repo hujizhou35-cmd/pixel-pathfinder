@@ -18,7 +18,7 @@ const RARITY_DATA = {
 
 # ---- 武器模板 ----
 const WEAPON_TEMPLATES = {
-	"sword": { "base_name": "长剑", "unique_5": "击杀敌人后获得 8 点护盾", "slot": "weapon" },
+	"sword": { "base_name": "长剑", "unique_5": "击杀敌人后获得 5 点护盾", "slot": "weapon" },
 	"bow":   { "base_name": "长弓", "unique_5": "每场战斗首次攻击造成双倍伤害", "slot": "weapon" },
 	"axe":   { "base_name": "战斧", "unique_5": "对生命值高于 70% 的敌人伤害 +35%", "slot": "weapon" },
 }
@@ -35,7 +35,7 @@ const ACCESSORY_TEMPLATES = {
 
 # ---- 新增护具模板：头盔 / 裤子 / 鞋 ----
 const HELMET_TEMPLATES = {
-	"helmet": { "base_name": "头盔", "unique_5": "战斗开始时获得 12 点护盾", "slot": "helmet" },
+	"helmet": { "base_name": "头盔", "unique_5": "战斗开始时获得 8 点护盾", "slot": "helmet" },
 }
 const PANTS_TEMPLATES = {
 	"pants": { "base_name": "裤子", "unique_5": "每回合恢复 3 生命", "slot": "pants" },
@@ -58,6 +58,8 @@ const SLOT_NAMES = {
 const AFFIXES = {
 	"crit":      { "name": "精准",  "desc": "暴击率 +10%",                                  "kind": "off" },
 	"critdmg":   { "name": "残忍",  "desc": "暴击伤害 +40%",                                "kind": "off" },
+	"multihit":  { "name": "连击",  "desc": "连击数 +1（弓多射一箭；剑/斧追加一次 80% 伤害的攻击）", "kind": "off" },
+	"critcombo": { "name": "贯连",  "desc": "暴击后本场战斗连击数 +1（上限 +4）",           "kind": "off" },
 	"swift":     { "name": "迅捷",  "desc": "15% 概率追加连击",                             "kind": "off" },
 	"pierce":    { "name": "穿透",  "desc": "攻击力 +12%",                                  "kind": "off" },
 	"chain":     { "name": "连锁",  "desc": "攻击对其它敌人溅射 30%",                       "kind": "off" },
@@ -68,10 +70,10 @@ const AFFIXES = {
 	"focus":     { "name": "蓄势",  "desc": "防御时获得 1 层蓄势，下次攻击每层 +30%（最多 3 层）", "kind": "off" },
 	"execute":   { "name": "处决",  "desc": "对生命低于 30% 的敌人伤害 +40%",               "kind": "off" },
 	"block":     { "name": "守护",  "desc": "+10% 概率减半伤害",                            "kind": "def" },
-	"bulwark":   { "name": "壁垒",  "desc": "战斗开始时获得 10 护盾",                       "kind": "def" },
+	"bulwark":   { "name": "壁垒",  "desc": "战斗开始时获得 6 护盾",                        "kind": "def" },
 	"regen":     { "name": "再生",  "desc": "每回合恢复 2 生命",                            "kind": "def" },
 	"stone":     { "name": "石肤",  "desc": "受到的伤害减少 10%",                           "kind": "def" },
-	"shieldm":   { "name": "盾魂",  "desc": "所有护盾获取 +40%",                            "kind": "def" },
+	"shieldm":   { "name": "盾魂",  "desc": "所有护盾获取 +20%",                            "kind": "def" },
 	"thornsp":   { "name": "棘甲",  "desc": "受到攻击时反弹 20% 伤害",                      "kind": "def" },
 	"greed":     { "name": "贪婪",  "desc": "战斗金币收益 +25%",                            "kind": "exp" },
 	"fortune":   { "name": "幸运",  "desc": "装备掉落率 +15%",                              "kind": "exp" },
@@ -81,15 +83,32 @@ const AFFIXES = {
 	"swiftbash": { "name": "疾盾",  "desc": "盾击不再后手发动",                             "kind": "def" },
 	"bashcd":    { "name": "盾势",  "desc": "盾击冷却 -1",                                  "kind": "def" },
 	"shield2atk":{ "name": "盾转攻","desc": "盾击护盾减半，盾击伤害 +60%",                  "kind": "off" },
-	"atk2shield":{ "name": "攻转盾","desc": "攻击伤害 -15%，每次攻击后获得伤害 30% 的护盾", "kind": "def" },
+	"atk2shield":{ "name": "攻转盾","desc": "攻击伤害 -15%，每次攻击后获得伤害 15% 的护盾", "kind": "def" },
 }
 
 const AFFIX_KEYS = [
-	"crit", "critdmg", "swift", "pierce", "chain", "lifesteal", "stun", "burn",
+	"crit", "critdmg", "multihit", "critcombo", "swift", "pierce", "chain", "lifesteal", "stun", "burn",
 	"combo", "focus", "execute", "block", "bulwark", "regen", "stone", "shieldm",
 	"thornsp", "greed", "fortune", "haggle", "alchemy",
 	"swiftbash", "bashcd", "shield2atk", "atk2shield",
 ]
+
+# 锻打不可强化的开关型词条（数值型词条可锻打同词条升级，上限 Lv.3）
+const NON_STACK_AFFIXES = ["focus", "swiftbash", "shield2atk", "atk2shield"]
+const AFFIX_MAX_LEVEL = 3
+
+## 词条说明（带强化等级）：连击等数值词条显示按等级换算后的效果
+static func affix_desc(key: String, lv: int = 1) -> String:
+	var base = str(AFFIXES.get(key, {}).get("desc", ""))
+	if lv <= 1:
+		return base
+	if key == "multihit":
+		return "连击数 +%d（弓多射 %d 箭；剑/斧追加 %d 次 80%% 伤害的攻击）" % [lv, lv, lv]
+	if key == "critcombo":
+		return "暴击后本场战斗连击数 +%d（上限 +4）" % lv
+	if key == "bashcd":
+		return "盾击冷却 -%d" % lv
+	return "%s（已强化 Lv.%d，数值 ×%d）" % [base, lv, lv]
 
 # ============================================================
 # 开局天赋点（新存档创建时分配，固定 10 点）
@@ -118,14 +137,15 @@ const PERKS = {
 	"brutal":     { "name": "残暴",     "desc": "暴击伤害 +30%",                    "fx": { "crit_dmg": 30 } },
 	"windrunner": { "name": "疾风步",   "desc": "连击概率 +12%",                    "fx": { "extra_hit": 12 } },
 	"elementalist":{ "name": "元素亲和","desc": "元素触发率 +12%",                  "fx": { "elem_proc": 12 } },
-	"guardsoul":  { "name": "守护之魂", "desc": "护盾获取 +30%",                    "fx": { "shield_gain_pct": 30 } },
+	"guardsoul":  { "name": "守护之魂", "desc": "护盾获取 +15%",                    "fx": { "shield_gain_pct": 15 } },
+	"archmaster": { "name": "连击之道", "desc": "暴击后本场战斗连击数 +1（上限 +4）", "fx": { "crit_combo": 1 } },
 	"firstblood": { "name": "先发制人", "desc": "每场战斗第一回合伤害 +25%",        "fx": { "first_turn_pct": 25 } },
 	"treasurer":  { "name": "寻宝直觉", "desc": "装备掉落率 +15%，战斗金币 +15%",   "fx": { "loot_pct": 15, "gold_pct": 15 } },
 	"bashmaster": { "name": "盾击大师", "desc": "盾击冷却 -1 且盾击不再后手",       "fx": { "bash_cd_reduce": 1, "bash_fast": 1 } },
 	"bloodpact":  { "name": "血之契约", "desc": "每次命中回复造成伤害 8% 的生命",   "fx": { "lifesteal": 8 } },
 }
 const PERK_KEYS = ["berserker", "giant", "ironwall", "sharpeye", "brutal", "windrunner",
-	"elementalist", "guardsoul", "firstblood", "treasurer", "bashmaster", "bloodpact"]
+	"elementalist", "guardsoul", "firstblood", "treasurer", "bashmaster", "bloodpact", "archmaster"]
 
 # ---- 装备前缀 ----
 const EQUIP_PREFIXES = ["破旧的", "坚固的", "锋利的", "淬火的", "符文的", "皇家", "远古的", "晨曦", "风暴", "灰烬", "霜冻", "镀金"]
@@ -145,8 +165,8 @@ const SET_BONUSES = {
 				"three": { "desc": "元素克制伤害加成翻倍", "fx": { "elem_counter_x2": 1 } } },
 	"皇家":   { "name": "王廷",    "two": { "desc": "攻击与防御 +8%", "fx": { "atk_pct": 8, "def_pct": 8 } },
 				"three": { "desc": "战斗金币收益 +50%", "fx": { "gold_pct": 50 } } },
-	"远古的": { "name": "遗世",    "two": { "desc": "护盾获取 +30%", "fx": { "shield_gain_pct": 30 } },
-				"three": { "desc": "战斗开始时获得 20 护盾", "fx": { "shield_start": 20 } } },
+	"远古的": { "name": "遗世",    "two": { "desc": "护盾获取 +15%", "fx": { "shield_gain_pct": 15 } },
+				"three": { "desc": "战斗开始时获得 10 护盾", "fx": { "shield_start": 10 } } },
 	"晨曦":   { "name": "黎明",    "two": { "desc": "每场战斗第一回合伤害 +30%", "fx": { "first_turn_pct": 30 } },
 				"three": { "desc": "战斗开始时恢复 15% 生命", "fx": { "battle_heal": 15 } } },
 	"风暴":   { "name": "雷霆",    "two": { "desc": "连击概率 +15%", "fx": { "extra_hit": 15 } },
@@ -344,12 +364,14 @@ const PLAYER_BASE = {
 }
 
 # ---- 战斗数值公式 ----
+# 护盾体系（大幅削弱版）：基础值与防御系数下调，且总护盾有上限
 const COMBAT = {
 	"potion_heal_pct": 0.40,
-	"base_def_shield": 7,
-	"def_shield_def_mult": 1.6,
-	"base_skill_shield": 6,
-	"skill_shield_def_mult": 1.2,
+	"base_def_shield": 5,
+	"def_shield_def_mult": 0.6,
+	"base_skill_shield": 4,
+	"skill_shield_def_mult": 0.5,
+	"shield_cap_pct": 0.40,    # 玩家护盾上限 = 最大生命 × 40%
 	"skill_dmg_mult": 1.35,
 	"skill_cooldown": 3,
 	"defend_cooldown": 2,      # 防御冷却：不能无脑堆护盾
@@ -362,12 +384,12 @@ const COMBAT = {
 	"extra_hit_dmg_mult": 0.8,
 	"enemy_count_normal": { "1": 0.40, "2": 0.45, "3": 0.15 },
 	"sell_refund_pct": 0.50,
-	# 武器职业差异：斧高伤但攻击有冷却 / 剑无冷却且盾击先手 / 弓低伤多段（暴击叠连击）
+	# 武器职业差异：斧高伤但攻击有冷却 / 剑无冷却且盾击先手 / 弓低伤多段
 	"axe_dmg_mult": 1.55,
 	"axe_cooldown": 1,
 	"bow_hits": 2,
 	"bow_hit_mult": 0.62,
-	"bow_combo_cap": 4,        # 弓：暴击叠加的额外连击数上限
+	"bow_combo_cap": 4,        # 贯连词条/连击之道天赋：暴击叠加的连击数上限
 	# 元素克制
 	"elem_counter_mult": 1.30,
 	"elem_resist_mult": 0.80,
@@ -375,10 +397,14 @@ const COMBAT = {
 	"burn_turns": 2,
 	"burn_atk_pct": 0.25,      # 灼烧每回合伤害 = 玩家攻击 × 25%
 	"weaken_pct": 0.30,        # 冰缚/削弱：敌人攻击降低比例
-	# 无限周目：每个强化周目的成长系数
+	# 岩盾触发护盾 = 4 + 防御 × 0.3
+	"earth_shield_base": 4.0,
+	"earth_shield_def_mult": 0.3,
+	# 无限周目：每个强化周目的成长系数（攻击与护盾强化）
 	"cycle_hp_mult": 0.55,
-	"cycle_atk_mult": 0.45,
+	"cycle_atk_mult": 0.60,
 	"cycle_gold_mult": 0.35,
+	"cycle_enemy_shield_mult": 0.35,   # 周目越高，怪物护盾越厚
 	# 熔炼与锻打
 	"forge_cost_base": 60,
 	"forge_cost_region": 30,
@@ -588,6 +614,47 @@ const EVENT_POOL = [
 		],
 	},
 ]
+
+# ============================================================
+# 剧情 CG（assets/cg/N.png + 字幕浮现 + 下一步）
+# 1-8：区域 1-4 进入前/首领战后成对；9：区域 5 进入前；
+# 10：区域 5 首领战前；11-13：击败最终首领后（衔接下一周目轮回）
+# ============================================================
+const CG_DATA = {
+	1: { "title": "翠林秘境 · 启程",
+		"text": "雾起于古林，树影如同沉默的巨兽伏卧大地。探险者踏入这片被遗忘的秘境时，听见的不是风声，而是腐化根系在黑土下缓缓苏醒的低吟。传言中的庇护之森，已然沦为第一道裂开的封印之地。" },
+	2: { "title": "翠林秘境 · 封印初现",
+		"text": "当森林领主倒下，盘踞林间的诅咒随之崩散，古树重新挺起被压弯的枝干。探险者拾起第一枚古印碎片，方才明白，这片森林并非终点，而是灾厄蔓延的起始。真正的道路，正在更深处等待他的踏入。" },
+	3: { "title": "大漠荒原 · 黄沙之祭",
+		"text": "越过林海，天地骤然化作无垠黄沙。烈日灼空，风暴如刃，埋葬了古王朝的废墟在沙下静默千年。亡者的咒音在夜幕中回荡，仿佛这片荒原本身，便是献给死亡的祭坛。" },
+	4: { "title": "大漠荒原 · 神庙重光",
+		"text": "沙海死神在风暴中碎裂，黄沙裹挟着断刃与咒文沉入地底。被掩埋的神庙重见天光，仿佛沉睡已久的古老意志终于被唤醒。第二枚印记现世，五方封印的真相，也随之露出冰冷的一角。" },
+	5: { "title": "凛冬雪原 · 冰封长路",
+		"text": "离开炽热沙海，探险者踏入极北冻土。暴雪遮天，寒意侵骨，断旗与冰碑静立于死寂之中，见证着早已消逝的誓言。这里没有温度，没有回声，只有通往命运深处的冰冷长路。" },
+	6: { "title": "凛冬雪原 · 击穿冰墙",
+		"text": "霜冻泰坦崩裂之时，积雪深处传来远古战鼓般的回响。探险者自冰冠祭坛取回第三枚印记，也看见了被冻封千年的守誓之地。寒冬未曾终结，但挡在前路上的冰墙，已被他亲手击穿。" },
+	7: { "title": "烈焰火山 · 火与钢的圣域",
+		"text": "穿过雪原尽头，地脉的怒火自黑曜石裂缝间喷涌而出。熔岩翻腾，铁链低鸣，古代锻炉在深渊中仍未沉寂。这里是火与钢的圣域，也是五重封印中最为狂暴的一环。若要继续前行，便必须踏过这座燃烧的深渊。" },
+	8: { "title": "烈焰火山 · 地火归寂",
+		"text": "炎魔核心轰然破碎，烈焰如潮退去，地脉之火重归沉寂。探险者立于焦黑王座之前，第四枚印记在掌中发出微光，也照亮了深埋于火山之下的古代封印装置。至此，他终于明白，自己所面对的，正是一个正在失控的远古秩序。" },
+	9: { "title": "远古遗迹 · 终局之门",
+		"text": "当探险者抵达远古遗迹，眼前已不是人间景象，而是被时间遗忘的神话残章。石桥横亘虚空，神殿倒悬天穹，沉默的石像与圣灵守望着失落的誓约。这里是终局的门扉，也是古代文明最后的心脏。" },
+	10: { "title": "神座之前",
+		"text": "守护者尚未显现全貌，遗迹深处的封印却已开始轰鸣。探险者独自立于崩塌的石阶尽头，仰望那座悬于虚空中的古老神座——这不是终点，而是与旧世界意志正面相撞的开端。" },
+	11: { "title": "决战 · 列阵",
+		"text": "同伴们在封印之环前列阵，刀锋、法杖与圣器同时指向天空。守护者自黄金光幕中缓缓苏醒，整座遗迹随之震颤。远征者已踏入命运核心，最后的战斗，终于拉开帷幕。" },
+	12: { "title": "决战 · 意志相撞",
+		"text": "战斗在轰鸣中爆发。冒险者高举武器，踏着碎裂的石阶直冲而上；守护者则以无可匹敌的古代之力回应，符文、烈光与崩裂的岩石在半空交错。每一次碰撞，都像是在撼动整座遗迹的命脉。此刻已无退路，唯有以意志回应意志，以火焰击碎永恒。" },
+	13: { "title": "轮回开启",
+		"text": "当守护者倒下，遗迹却并未沉入死寂。相反，远方的五大区域再度泛起光芒，仿佛这场远征从未真正结束。探险者立于废墟之上，回望那条已经走过的道路，终于明白：所谓终点，不过是下一次轮回的起点。更深的试炼，正在黑暗尽头静静等待。\n\n“寻路者，欢迎来到新周目——这里的敌人……已经记住了你的套路。”" },
+}
+const CG_REGION_ENTER = [1, 3, 5, 7, 9]    # 各区域进入前
+const CG_REGION_CLEAR = [2, 4, 6, 8]       # 区域 1-4 首领战后
+const CG_PRE_FINAL_BOSS = 10               # 区域 5 首领战前
+const CG_FINALE = [11, 12, 13]             # 最终首领战后（每周目轮回都播放）
+
+static func get_cg(id: int) -> Dictionary:
+	return CG_DATA.get(id, { "title": "", "text": "" })
 
 # ---- 辅助函数 ----
 static func get_rarity_name(rarity: int) -> String:

@@ -121,7 +121,9 @@ func _make_node_button(node: Dictionary, center: Vector2) -> void:
 	b.pressed.connect(func(): _on_node_pressed(node))
 	add_child(b)
 
-	var icon_name = ICON_BY_TYPE.get(node.type, "question")
+	# 已探索的节点（商店除外）换成旗帜图标，一眼区分
+	var done = bool(node.get("visited", false)) and node.type != GameData.NodeType.SHOP
+	var icon_name = "flag" if done else ICON_BY_TYPE.get(node.type, "question")
 	var tex = load("res://assets/sprites/icons/%s.png" % icon_name)
 	if tex:
 		var tr = TextureRect.new()
@@ -136,17 +138,19 @@ func _make_node_button(node: Dictionary, center: Vector2) -> void:
 		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(tr)
 
-	# 节点说明（战斗节点显示敌人数量；商店标注可回访）
+	# 节点说明（战斗节点显示敌人数量；商店标注可回访；已探索明确标出）
 	var label_text: String = GameData.NODE_TYPE_NAMES.get(node.type, "?")
 	var foes: Array = node.get("foes", [])
-	if node.type in [GameData.NodeType.BATTLE, GameData.NodeType.ELITE] and foes.size() > 0:
+	if done:
+		label_text = "已探索"
+	elif node.type in [GameData.NodeType.BATTLE, GameData.NodeType.ELITE] and foes.size() > 0:
 		label_text += " ×%d" % foes.size()
 	if node.type == GameData.NodeType.SHOP and node.get("visited", false):
 		label_text += "·可回访"
 	var lbl = Label.new()
 	lbl.text = label_text
 	lbl.add_theme_font_size_override("font_size", 13)
-	lbl.add_theme_color_override("font_color", UITheme.C_TEXT_DIM)
+	lbl.add_theme_color_override("font_color", Color("#7ea06a") if done else UITheme.C_TEXT_DIM)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.position = Vector2(0, bsize.y - 22)
 	lbl.size = Vector2(bsize.x, 18)
@@ -178,7 +182,7 @@ func _update_states() -> void:
 		if on_it:
 			b.modulate = Color(1.0, 0.95, 0.7, 1.0)
 		elif node.visited and node.type != GameData.NodeType.SHOP:
-			b.modulate = Color(0.5, 0.5, 0.55, 0.75)
+			b.modulate = Color(0.42, 0.5, 0.42, 0.62)   # 已探索：绿灰压暗
 		elif adjacent:
 			b.modulate = Color.WHITE
 		else:

@@ -45,6 +45,10 @@ signal drop_received(item: Dictionary)
 signal gold_changed(amount: int)
 signal potion_changed(count: int)
 
+# 剧情 CG
+signal play_cg(ids: Array, tag: String)
+signal cg_finished(tag: String)
+
 # UI相关
 signal show_modal(modal_type: String, data: Dictionary)
 signal hide_modal

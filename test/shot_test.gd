@@ -79,7 +79,10 @@ func _run() -> void:
 	modal.close_all()
 
 	GameState.start_new_game(0, "图鉴骑士", { "vit": 4, "str": 3, "tough": 2, "agi": 1 })
-	await _wait(0.5)
+	await _wait(0.8)
+	await _shot("02c_cg_region_enter")
+	main_node.cg_layer.skip_all()
+	await _wait(0.3)
 	await _shot("03_map")
 
 	# 地图移动：小人走两步（验证路线与高亮）
@@ -161,10 +164,14 @@ func _run() -> void:
 	await _shot("09c_perk_choice")
 	modal.close_all()
 
-	# 图鉴：装备库 100 件 / 怪物 / 五行
+	# 图鉴：装备库 / 机制页 / 怪物 / 元素
 	SignalBus.show_modal.emit("codex", { "tab": "equip" })
 	await _wait(0.5)
 	await _shot("10_codex_equip100")
+	modal.close_all()
+	SignalBus.show_modal.emit("codex", { "tab": "mech" })
+	await _wait(0.4)
+	await _shot("10b_codex_mechanics")
 	modal.close_all()
 	SignalBus.show_modal.emit("codex", { "tab": "monster" })
 	await _wait(0.4)
