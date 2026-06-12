@@ -70,20 +70,23 @@ func _force_player_turn() -> void:
 func _run() -> void:
 	var modal = main_node.modal_layer
 
-	# ---- 0. CG 资源与数据 ----
-	_check(GameData.CG_DATA.size() == 13, "CG 文案共 13 条")
+	# ---- 0. CG 资源与数据（含开场序章 14-18） ----
+	_check(GameData.CG_DATA.size() == 18, "CG 文案共 18 条（含序章 5 条）")
 	var cg_files_ok = true
-	for i in range(1, 14):
+	for i in range(1, 19):
 		if not FileAccess.file_exists("res://assets/cg/%d.png" % i):
 			cg_files_ok = false
-	_check(cg_files_ok, "13 张 CG 图片资源齐全")
+	_check(cg_files_ok, "18 张 CG 图片资源齐全")
+	_check(GameData.CG_INTRO == [14, 15, 16, 17, 18], "序章 CG 列表为 14-18")
 
 	# ---- 1. 新游戏（带起名与天赋点） ----
 	GameState.start_new_game(2, "测试勇者", { "vit": 4, "str": 3, "tough": 2, "agi": 1 })
 	await _frames()
-	# 区域进入 CG 会自动播放 → 验证后跳过
+	# 开场序章 + 区域进入 CG 会自动播放 → 验证后跳过
 	_check(main_node.cg_layer.is_playing(), "进入区域时播放剧情 CG")
+	_check(GameState.seen_cgs.has("intro"), "新远征播放开场序章（已记录）")
 	_check(GameState.seen_cgs.has("enter_2"), "CG 播放记录入档（每存档一次）")
+	_check(main_node.cg_layer._queue.size() == GameData.CG_INTRO.size() + 1, "序章 5 张 + 区域进入 1 张顺序入队 (实际 %d)" % main_node.cg_layer._queue.size())
 	main_node.cg_layer.skip_all()
 	await _frames()
 	_check(GameState.current_state == GameState.State.MAP, "新游戏进入地图（区域3开局）")
@@ -288,7 +291,10 @@ func _run() -> void:
 	_check(GameState.gold == gold_b - GameState.get_forge_cost(), "锻打消耗金币")
 	_check(GameState.essences.is_empty(), "精华已消耗")
 
-	# ---- 9b. 同词条锻打 → 词条强化（连击 Lv 系统） ----
+	# ---- 9b. 同词条锻打 → 词条强化（连击 Lv 系统，需在弓上进行） ----
+	var bow9 = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("wood_长弓"), 2, GameData.Rarity.COMMON)
+	GameState.equipment.weapon = bow9
+	wpn = GameState.equipment.weapon
 	wpn["affixes"] = ["multihit"]
 	wpn["affix_lv"] = {}
 	var s_lv1 = EquipmentModifier.calculate_total_stats(GameState.equipment)
@@ -333,6 +339,66 @@ func _run() -> void:
 	wpn["affixes"] = []
 	wpn["affix_lv"] = {}
 
+	# ---- 9d. 连击词条限制：只出现在弓/配饰，锻打同样受限 ----
+	var sword_t = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("metal_长剑"), 2, GameData.Rarity.COMMON)
+	sword_t["affixes"] = []
+	_check(not GameState.can_forge_to(sword_t, "multihit").ok, "连击词条不能锻打到剑上")
+	_check(not GameState.can_forge_to(sword_t, "critcombo").ok, "贯连词条不能锻打到剑上")
+	var bow_t = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("wood_长弓"), 2, GameData.Rarity.COMMON)
+	bow_t["affixes"] = []
+	_check(GameState.can_forge_to(bow_t, "multihit").ok, "连击词条可锻打到弓上")
+	var acc_t = EquipmentFactory.generate_item(0, "accessory", GameData.Rarity.COMMON)
+	acc_t["affixes"] = []
+	_check(GameState.can_forge_to(acc_t, "critcombo").ok, "贯连词条可锻打到配饰上")
+	var gen_combo_ok = true
+	for i in range(60):
+		var it_g = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.LEGENDARY)
+		if str(it_g.key) != "bow":
+			for a in it_g.affixes:
+				if a in GameData.COMBO_AFFIXES:
+					gen_combo_ok = false
+	_check(gen_combo_ok, "非弓武器出厂不带连击/贯连词条 (60 次抽样)")
+
+	# ---- 9e. 精铸制度：分解得精粹 + 精铸提升区域基准 ----
+	GameState.best_eff = maxi(GameState.best_eff, GameState.region + GameState.cycle * 5)
+	var dust_before = GameState.refine_dust
+	var junk = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("metal_长剑"), 0, GameData.Rarity.RARE)
+	GameState.bag.clear()
+	GameState.bag.append(junk)
+	_check(GameState.dismantle_bag_item(0), "分解装备成功")
+	_check(GameState.refine_dust == dust_before + 3, "稀有装备分解得 3 精粹 (实际 +%d)" % (GameState.refine_dust - dust_before))
+	_check(GameData.dust_gain(GameData.Rarity.LEGENDARY) == 20 and GameData.dust_gain(GameData.Rarity.EPIC) == 8, "分解精粹值：史诗8/传说20")
+	# 低区域出厂的史诗装备 → 精铸到当前最高区域基准
+	var old_epic = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("fire_战斧"), 0, GameData.Rarity.EPIC)
+	old_epic["affixes"] = ["crit"]
+	old_epic["level"] = 3
+	old_epic["tier_eff"] = 0
+	GameState.bag.append(old_epic)
+	_check(GameState.can_refine(old_epic), "低基准史诗装备可精铸 (best_eff=%d)" % GameState.best_eff)
+	GameState.refine_dust = 10
+	var atk_before_r = int(old_epic.stats.atk)
+	var expected_base = EquipmentFactory.baseline_stats(old_epic, GameState.best_eff)
+	_check(GameState.refine_item({ "kind": "bag", "index": GameState.bag.size() - 1 }), "精铸执行成功")
+	_check(GameState.refine_dust == 5, "精铸消耗 5 精粹")
+	_check(int(old_epic.stats.atk) == int(expected_base.atk) and int(old_epic.stats.atk) > atk_before_r, "精铸后攻击提升到区域基准 (%d→%d)" % [atk_before_r, int(old_epic.stats.atk)])
+	_check(int(old_epic.level) == 3 and old_epic.affixes.has("crit"), "精铸保留强化等级与词条")
+	_check(int(old_epic.tier_eff) == GameState.best_eff and not GameState.can_refine(old_epic), "精铸后基准更新为当前最高")
+	var common_it = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("metal_长剑"), 0, GameData.Rarity.COMMON)
+	common_it["tier_eff"] = 0
+	_check(not GameState.can_refine(common_it), "普通/稀有装备不可精铸")
+	GameState.bag.clear()
+
+	# ---- 9f. 图鉴隐藏指令 drug / heart / money ----
+	_check(GameState.apply_cheat("drug7"), "隐藏指令 drug7 执行")
+	_check(GameState.potions == 7, "药水数量变为 7 (实际 %d)" % GameState.potions)
+	_check(GameState.apply_cheat("heart200"), "隐藏指令 heart200 执行")
+	_check(GameState.max_hp == 200 and GameState.hp == 200, "生命上限与生命变为 200 (实际 %d/%d)" % [GameState.hp, GameState.max_hp])
+	var gold_cheat = GameState.gold
+	_check(GameState.apply_cheat("money123"), "隐藏指令 money123 执行")
+	_check(GameState.gold == gold_cheat + 123, "获得 123 金币")
+	_check(not GameState.apply_cheat("drugX") and not GameState.apply_cheat("好运"), "非法指令被拒绝")
+	GameState.potions = 2
+
 	# ---- 10. 背包：扩容 32 + 整理排序 ----
 	_check(GameData.PLAYER_BASE["bag_capacity"] == 32, "背包容量 32")
 	GameState.bag.clear()
@@ -368,11 +434,26 @@ func _run() -> void:
 			["bag", {"filter": "weapon"}], ["bag", {"filter": "clothes"}],
 			["codex", {"tab": "equip"}], ["codex", {"tab": "affix"}], ["codex", {"tab": "perk"}],
 			["codex", {"tab": "monster"}], ["codex", {"tab": "boss"}], ["codex", {"tab": "event"}],
-			["codex", {"tab": "element"}]]:
+			["codex", {"tab": "element"}], ["codex", {"tab": "mech"}]]:
 		SignalBus.show_modal.emit(t[0], t[1])
 		await _frames(3)
 		_check(modal.is_open(), "弹窗 %s/%s 构建成功" % [t[0], str(t[1].get("tab", t[1].get("filter", "")))])
 		modal.close_all()
+	await _frames()
+
+	# ---- 12b. 图鉴搜索 ----
+	SignalBus.show_modal.emit("codex", { "tab": "equip", "query": "连击" })
+	await _frames(3)
+	_check(modal.is_open(), "图鉴搜索结果页构建成功")
+	var sres = modal._codex_search_index("史莱姆")
+	_check(sres.size() > 0 and str(sres[0].tab) == "monster", "搜索「史莱姆」定位到怪物页")
+	_check(modal._codex_search_index("精铸").size() > 0, "搜索「精铸」命中机制页")
+	_check(modal._codex_search_index("护符").size() > 0, "搜索「护符」命中装备库")
+	# 搜索跳转构建（带 locate 高亮）
+	SignalBus.show_modal.emit("codex", { "tab": "monster", "locate": "史莱姆" })
+	await _frames(4)
+	_check(modal.is_open(), "搜索跳转定位构建成功")
+	modal.close_all()
 	await _frames()
 	GameState.change_state(GameState.State.MAP)
 
@@ -498,11 +579,38 @@ func _run() -> void:
 	_check(GameState.combat_state.cooldowns.potion >= 2, "药水进入冷却")
 	# 斧攻击冷却
 	var axe = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("fire_战斧"), 2, GameData.Rarity.COMMON)
+	axe["affixes"] = []
 	GameState.equipment.weapon = axe
 	GameState._recalc_stats()
 	_force_player_turn()
 	main_node.combat_node.player_attack(0)
 	_check(GameState.combat_state.cooldowns.attack == GameData.COMBAT["axe_cooldown"] + 1, "斧攻击后进入冷却")
+
+	# 斧·破甲：命中叠层（上限 2 层）
+	var sunder_e = GameState.combat_state.enemies[0]
+	sunder_e.hp = maxi(sunder_e.hp, 99999)
+	sunder_e.maxhp = maxi(sunder_e.maxhp, 99999)
+	sunder_e.affixes = []
+	sunder_e.sunder = 0
+	cn._do_hit(0, 1.0, GameState.get_player_stats(), "axe")
+	_check(int(sunder_e.get("sunder", 0)) == 1, "斧命中附加 1 层破甲")
+	cn._do_hit(0, 1.0, GameState.get_player_stats(), "axe")
+	cn._do_hit(0, 1.0, GameState.get_player_stats(), "axe")
+	_check(int(sunder_e.get("sunder", 0)) == 2, "破甲最多叠 2 层")
+
+	# 剑：盾击护盾 ×1.5
+	var sw_w2 = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("metal_长剑"), 2, GameData.Rarity.COMMON)
+	sw_w2["affixes"] = []
+	GameState.equipment.weapon = sw_w2
+	GameState._recalc_stats()
+	_force_player_turn()
+	GameState.combat_state.skill_cooldown = 0
+	GameState.combat_state.shield = 0
+	var st_sw = GameState.get_player_stats()
+	var expect_sw_shield = cn._shield_gain(st_sw, (GameData.COMBAT["base_skill_shield"] + st_sw.def * GameData.COMBAT["skill_shield_def_mult"]) * GameData.COMBAT["sword_bash_shield_mult"])
+	cn.player_skill(0)
+	var got_sw_shield = int(GameState.combat_state.shield)
+	_check(got_sw_shield > 0 and absi(got_sw_shield - expect_sw_shield) <= 1, "剑盾击护盾 ×1.5 (获得 %d，期望约 %d)" % [got_sw_shield, expect_sw_shield])
 	await get_tree().create_timer(2.0).timeout
 
 	# 秒杀全部敌人 → 胜利奖励
@@ -519,18 +627,43 @@ func _run() -> void:
 	modal.close_all()
 	await _frames(3)
 
-	# ---- 14b. 掉落稀有度收紧：精英 90/10 稀有/史诗，首领 90/10 史诗/传奇 ----
+	# ---- 14b. 掉落稀有度：精英 稀有:史诗=7:3，首领 史诗:传奇=7:3 ----
 	var elite_ok = true
 	var boss_ok = true
-	for i in range(20):
+	var elite_epic = 0
+	var boss_leg = 0
+	for i in range(40):
 		var r1 = LootSystem.calculate_combat_rewards([{ "gold_reward": 10 }], false, true)
 		if r1.drop == null or r1.drop.rarity < GameData.Rarity.RARE or r1.drop.rarity > GameData.Rarity.EPIC:
 			elite_ok = false
+		elif int(r1.drop.rarity) == GameData.Rarity.EPIC:
+			elite_epic += 1
 		var r2 = LootSystem.calculate_combat_rewards([{ "gold_reward": 10 }], true, false)
 		if r2.drop == null or r2.drop.rarity < GameData.Rarity.EPIC:
 			boss_ok = false
-	_check(elite_ok, "精英掉落仅稀有/史诗，不再掉传奇 (20 次抽样)")
-	_check(boss_ok, "首领必掉史诗+（10% 传奇）(20 次抽样)")
+		elif int(r2.drop.rarity) == GameData.Rarity.LEGENDARY:
+			boss_leg += 1
+	_check(elite_ok, "精英掉落仅稀有/史诗，不掉传奇 (40 次抽样)")
+	_check(boss_ok, "首领必掉史诗+ (40 次抽样)")
+	_check(elite_epic > 0, "精英爆率 30%% 史诗已生效（40 次中 %d 件史诗）" % elite_epic)
+	_check(boss_leg > 0, "首领爆率 30%% 传奇已生效（40 次中 %d 件传奇）" % boss_leg)
+	_check(GameData.RARITY_WEIGHTS["elite"][1] == 0.70 and GameData.RARITY_WEIGHTS["elite"][2] == 0.30, "精英权重 稀有:史诗=7:3")
+	_check(GameData.RARITY_WEIGHTS["boss"][2] == 0.70 and GameData.RARITY_WEIGHTS["boss"][3] == 0.30, "首领权重 史诗:传奇=7:3")
+
+	# ---- 14c. 周目难度：新周目区域 1 强于上周目区域 5 ----
+	var prev_r5 = CombatManager.enemy_stats_for(plain_foe, 4, 0)
+	var next_r1 = CombatManager.enemy_stats_for(plain_foe, 0, 1)
+	_check(next_r1.hp > prev_r5.hp and next_r1.atk > prev_r5.atk and next_r1.def > prev_r5.def,
+		"2周目区域1 (%d/%d/%d) 强于 1周目区域5 (%d/%d/%d)" % [next_r1.hp, next_r1.atk, next_r1.def, prev_r5.hp, prev_r5.atk, prev_r5.def])
+
+	# ---- 14d. 阶段四数值确认 ----
+	_check(absf(GameData.COMBAT["bow_hit_mult"] - 0.4) < 0.001, "弓每箭伤害降为 ×0.4")
+	_check(int(GameData.COMBAT["bow_combo_cap"]) == 2, "贯连上限 +2")
+	_check(int(GameData.COMBAT["multihit_cap"]) == 5, "连击数上限 5")
+	_check(absf(GameData.COMBAT["axe_dmg_mult"] - 1.7) < 0.001, "斧伤害提升至 ×1.7")
+	var sunder_dummy = { "hp": 1000, "maxhp": 1000, "shield": 0, "def": 20, "sunder": 2, "affixes": [], "hit_flash": 0 }
+	DamageCalculator.apply_damage_to_enemy(sunder_dummy, 30, false)
+	_check(sunder_dummy.hp == 1000 - (30 - 14), "2 层破甲：防御 20→14 (掉血 %d)" % (1000 - sunder_dummy.hp))
 
 	# ---- 15. 商店 9 件 + 可重复进入 + 涨价 60% ----
 	GameState.open_shop()
@@ -639,12 +772,52 @@ func _run() -> void:
 	await _frames(2)
 	_check(GameState.cycle == 1, "读档恢复周目")
 
-	# ---- 18. 区域切换 ----
+	# ---- 18. 区域切换 + 同周目关卡记录保留 ----
 	GameState.change_state(GameState.State.MAP)
 	GameState.switch_region(3)
 	main_node.cg_layer.skip_all()
 	await _frames(2)
 	_check(GameState.region == 3 and GameState.cycle == 1, "切区保持周目")
+	# 标记区域 4 的一个节点为已探索并移动小人 → 切走再切回，记录保留
+	var mark_node = GameState.current_map.nodes[0]
+	mark_node.visited = true
+	var mark_id = int(mark_node.id)
+	GameState.hero_pos = mark_id
+	var map_ref = GameState.current_map
+	GameState.switch_region(0)
+	main_node.cg_layer.skip_all()
+	await _frames(2)
+	_check(GameState.region == 0, "切到区域 1")
+	GameState.switch_region(3)
+	await _frames(2)
+	_check(GameState.current_map == map_ref, "切回区域 4：地图对象保留（关卡不重置）")
+	_check(bool(GameState.get_node_by_id(mark_id).visited), "已探索节点记录保留")
+	_check(GameState.hero_pos == mark_id, "小人位置随区域记录恢复")
+	# 存档/读档后多区域记录依然保留
+	GameState.change_state(GameState.State.MAP)
+	GameState.save_game()
+	GameState.load_game()
+	await _frames(2)
+	_check(GameState.region == 3 and bool(GameState.get_node_by_id(mark_id).visited), "读档后本区域探索记录保留")
+	_check(GameState.region_maps.has(0) and GameState.region_maps.has(3), "读档后多区域地图进度保留")
+	GameState.switch_region(0)
+	await _frames(2)
+	_check(GameState.region == 0, "读档后可切回区域 1（记录独立保留）")
+	# 死亡只重置当前区域：区域 1 死亡 → 区域 1 重置、区域 4 记录不动
+	GameState.current_map.nodes[0].visited = true
+	GameState.player_defeated()
+	await _frames(3)
+	modal.close_all()
+	GameState.retry_region()
+	await _frames(2)
+	var r0_reset = true
+	for n in GameState.current_map.nodes:
+		if bool(n.get("visited", false)):
+			r0_reset = false
+	_check(r0_reset, "死亡后当前区域关卡重置")
+	GameState.switch_region(3)
+	await _frames(2)
+	_check(bool(GameState.get_node_by_id(mark_id).visited), "死亡不影响其它区域的关卡记录")
 
 	# ---- 结果 ----
 	_restore_saves()

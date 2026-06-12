@@ -69,7 +69,7 @@ static func _roll_foe(region: int, cycle: int, biome: Dictionary, elite: bool, b
 	return { "key": key, "elite": elite, "boss": boss, "affixes": affixes, "element": elem }
 
 ## 确定性数值（供预览与实战共用）
-## 攻击基准为旧版约 2 倍；新增防御属性（固定减免玩家每次伤害）；生命不变
+## 有效区域 = 区域 + 周目×5：新周目区域 1 的敌人严格强于上一周目区域 5，无限递增
 static func enemy_stats_for(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 	var boss = bool(foe.get("boss", false))
 	var elite = bool(foe.get("elite", false))
@@ -93,13 +93,12 @@ static func enemy_stats_for(foe: Dictionary, region: int, cycle: int) -> Diction
 		hp_mult *= 1.5
 	if affixes.has("mighty"):
 		atk_mult *= 1.3
-	# 周目缩放
-	var cyc_hp = 1.0 + cycle * GameData.COMBAT["cycle_hp_mult"]
-	var cyc_atk = 1.0 + cycle * GameData.COMBAT["cycle_atk_mult"]
+	# 周目缩放：按"有效区域"继续沿区域曲线成长（区域 + 周目×5）
+	var eff = float(region + cycle * 5)
 	return {
-		"hp": maxi(1, roundi((20.0 + region * 16.0) * hp_mult * cyc_hp)),
-		"atk": maxi(1, roundi((10.0 + region * 7.0) * atk_mult * cyc_atk)),
-		"def": maxi(1, roundi((2.0 + region * 2.2) * def_mult * (1.0 + cycle * 0.5))),
+		"hp": maxi(1, roundi((20.0 + eff * 16.0) * hp_mult)),
+		"atk": maxi(1, roundi((10.0 + eff * 7.0) * atk_mult)),
+		"def": maxi(1, roundi((2.0 + eff * 2.2) * def_mult)),
 	}
 
 ## 按构成生成战斗实例
@@ -166,6 +165,8 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 		"weaken": 0,
 		"burn": 0,
 		"burn_dmg": 0,
+		"sunder": 0,           # 斧破甲：层数（每层防御 -15%）
+		"sunder_turns": 0,     # 斧破甲：剩余回合
 		"berserk_done": false,
 		"acted": false,        # 先后手机制：本回合是否已行动
 		"guard_turn": 0,       # 坚守风格：举盾计数

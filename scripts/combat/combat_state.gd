@@ -7,7 +7,7 @@ const LootSystem = preload("res://scripts/equipment/loot_system.gd")
 # ============================================================
 # 战斗状态机
 # - 行动冷却：盾击3 / 防御2 / 药水3 / 斧攻击1（不能无脑堆防御）
-# - 武器差异：剑无冷却且盾击先手 / 斧 ×1.55 有冷却 / 弓多段+暴击叠连击
+# - 武器差异：剑无冷却、盾击先手且护盾+50%、有盾增伤 / 斧 ×1.7 破甲有冷却 / 弓多段（连击体系仅弓生效）
 # - 先后手机制：普攻/防御/药水先手（仅"先手"风格怪抢先）；
 #   盾击后手（全部敌人先动，剑/疾盾词条/盾击大师天赋可免）
 # - 怪物战斗风格：feral 必先手 / guard 周期举盾 / bash 攻击附带护盾
@@ -144,16 +144,23 @@ func player_attack(target_idx: int = -1) -> void:
 	var wkey = weapon.get("key", "sword") if weapon else "sword"
 
 	# 连击数 = 连击词条(multihit) + 贯连/连击之道积累的连击计数（本场战斗有效）
-	var bonus_hits = int(stats.get("multihit", 0)) + int(combat_data.get("bow_combo", 0))
+	# 连击体系仅对弓生效，且连击数上限 5
+	var bonus_hits = 0
+	if wkey == "bow":
+		bonus_hits = mini(int(GameData.COMBAT["multihit_cap"]),
+			int(stats.get("multihit", 0)) + int(combat_data.get("bow_combo", 0)))
 	var hits = 1 + bonus_hits
 	var per_mult = 1.0
 	match wkey:
 		"bow":
-			# 弓：基础 2 箭 + 连击数（每箭都是完整 ×0.62 一箭）
+			# 弓：基础 2 箭 + 连击数（每箭都是完整 ×0.4 一箭）
 			hits = GameData.COMBAT["bow_hits"] + bonus_hits
 			per_mult = GameData.COMBAT["bow_hit_mult"]
 		"axe":
 			per_mult = GameData.COMBAT["axe_dmg_mult"]
+	# 单次行动总攻击数硬上限（含迅捷追击）
+	var max_attacks = int(GameData.COMBAT["max_attacks_per_action"])
+	hits = mini(hits, max_attacks)
 
 	# 攻转盾词条：伤害打折，攻击后按总伤害获得护盾
 	if stats.get("atk2shield", false):
@@ -174,8 +181,16 @@ func player_attack(target_idx: int = -1) -> void:
 		SignalBus.combat_log_message.emit("长弓蓄势：首击双倍伤害！", "system")
 	combat_data.first_attack = false
 
+	# 剑·护盾增伤：护盾在身时普通攻击 +20%
+	if wkey == "sword" and int(combat_data.shield) > 0:
+		base_extra *= 1.0 + GameData.COMBAT["sword_shield_atk_pct"]
+		if not combat_data.get("sword_shield_tip", false):
+			combat_data["sword_shield_tip"] = true
+			SignalBus.combat_log_message.emit("剑盾合璧：护盾在身，剑刃伤害 +%d%%" % roundi(GameData.COMBAT["sword_shield_atk_pct"] * 100), "system")
+
 	var first_dmg = 0
 	var total_dmg = 0
+	var attacks_done = 0
 	for h in range(hits):
 		var target = _resolve_target(target_idx)
 		if target.index < 0:
@@ -187,14 +202,15 @@ func player_attack(target_idx: int = -1) -> void:
 			if wkey != "bow":
 				hm *= GameData.COMBAT["extra_hit_dmg_mult"]
 		var dealt = _do_hit(target.index, hm, stats, wkey)
+		attacks_done += 1
 		total_dmg += dealt
 		if h == 0:
 			first_dmg = dealt
 
-	# 贯连词条 / 连击之道天赋：本次行动每次暴击 → 本场战斗连击数 +Lv（有上限）
-	# （不再是弓的自带能力，需玩家自行搭配词条或天赋）
+	# 贯连词条 / 连击之道天赋：本次行动每次暴击 → 本场战斗连击数 +Lv
+	# 仅弓生效，上限 +2（不再是弓的自带能力，需玩家自行搭配词条或天赋）
 	var cc = int(stats.get("crit_combo", 0))
-	if cc > 0:
+	if cc > 0 and wkey == "bow":
 		var crits = int(combat_data.get("crits_this_action", 0))
 		if crits > 0:
 			var cap = int(GameData.COMBAT["bow_combo_cap"])
@@ -228,12 +244,15 @@ func player_attack(target_idx: int = -1) -> void:
 			SignalBus.player_attacked.emit(i, sd, false)
 			SignalBus.combat_log_message.emit("剑气溅射 %s，造成 %d 点伤害" % [enemies[i].name, sd], "player")
 
-	# 迅捷词条：追加连击
-	var t2 = _resolve_target(target_idx)
-	if t2.index >= 0 and randf() * 100 < stats.extra_hit:
+	# 迅捷词条：概率追加连击（可连续触发，但总攻击数不超过上限 10）
+	while attacks_done < max_attacks:
+		var t2 = _resolve_target(target_idx)
+		if t2.index < 0 or randf() * 100 >= stats.extra_hit:
+			break
 		var em = GameData.COMBAT["extra_hit_dmg_mult"] * (1.0 + stats.combo_dmg / 100.0)
 		SignalBus.combat_log_message.emit("迅捷连击！", "player")
 		_do_hit(t2.index, em * per_mult, stats, wkey)
+		attacks_done += 1
 
 	_kill_check()
 	_queue_next(_end_player_turn, 0.45)
@@ -303,6 +322,15 @@ func _do_hit(t_idx: int, mult: float, stats: Dictionary, wkey: String) -> int:
 		SignalBus.hp_changed.emit(GameState.hp, GameState.max_hp)
 		SignalBus.combat_log_message.emit("吸血：恢复 %d 生命" % ls, "heal")
 
+	# 斧·破甲打击：命中后降低目标防御 15%/层，持续 2 回合，最多 2 层
+	if wkey == "axe" and e.hp > 0:
+		var max_st = int(GameData.COMBAT["axe_sunder_stacks"])
+		var prev_st = int(e.get("sunder", 0))
+		e.sunder = mini(max_st, prev_st + 1)
+		e.sunder_turns = int(GameData.COMBAT["axe_sunder_turns"])
+		if e.sunder > prev_st:
+			SignalBus.combat_log_message.emit("破甲！%s 防御 -%d%%（%d 层）" % [e.name, roundi(GameData.COMBAT["axe_sunder_pct"] * 100 * e.sunder), e.sunder], "player")
+
 	# 荆棘：反弹伤害
 	if e.get("affixes", []).has("thorns") and dealt > 0 and GameState.hp > 0:
 		var ref = maxi(1, roundi(dealt * 0.20))
@@ -371,6 +399,9 @@ func player_skill(target_idx: int = -1) -> void:
 	if target.index >= 0:
 		var dmg_mult: float = GameData.COMBAT["skill_dmg_mult"]
 		var shield_base: float = GameData.COMBAT["base_skill_shield"] + stats.def * GameData.COMBAT["skill_shield_def_mult"]
+		# 剑·盾击精通：盾击获得的护盾量 +50%
+		if wkey == "sword":
+			shield_base *= GameData.COMBAT["sword_bash_shield_mult"]
 		# 盾转攻词条：护盾减半 → 伤害 +60%
 		if stats.get("shield2atk", false):
 			dmg_mult *= 1.6
@@ -559,6 +590,13 @@ func _process_enemy_action(e, idx: int) -> void:
 		if e.weaken == 0:
 			SignalBus.combat_log_message.emit("%s 摆脱了缠流" % e.name, "system")
 
+	# 破甲回合数衰减
+	if int(e.get("sunder_turns", 0)) > 0:
+		e.sunder_turns -= 1
+		if e.sunder_turns == 0 and int(e.get("sunder", 0)) > 0:
+			e.sunder = 0
+			SignalBus.combat_log_message.emit("%s 的甲胄恢复了" % e.name, "system")
+
 ## Boss 特性行动；返回 true 表示本回合用掉了行动
 func _boss_trait_action(e, idx: int) -> bool:
 	var T = e.traits
@@ -608,6 +646,7 @@ func _boss_trait_action(e, idx: int) -> bool:
 			"affixes": [], "element": str(biome.get("element", "")),
 			"style": str(template.get("style", "normal")),
 			"stun": 0, "weaken": 0, "burn": 0, "burn_dmg": 0, "berserk_done": false,
+			"sunder": 0, "sunder_turns": 0,
 			"acted": true, "guard_turn": 0,
 			"gold_reward": 0, "anim": 0, "hit_flash": 0, "counted": false,
 		}

@@ -11,7 +11,7 @@ extends RefCounted
 const LoreDataScript = preload("res://scripts/data/lore_data.gd")
 const ItemCatalogScript = preload("res://scripts/data/item_catalog.gd")
 
-## 各武器职业的听装攻击系数（战斗中：斧每击×1.55但冷却1回合，弓两段×0.62）
+## 各武器职业的攻击系数（战斗中：斧每击×1.7破甲但冷却1回合，弓两段×0.4）
 const CLASS_ATK_ADJUST = { "sword": 1.0, "axe": 1.15, "bow": 0.8 }
 
 static func effective_region(region: int) -> int:
@@ -69,6 +69,7 @@ static func build_from_entry(entry: Dictionary, eff: int, rar: int) -> Dictionar
 		"rarity": rar,
 		"level": 0,
 		"invested": 0,
+		"tier_eff": eff,   # 出厂基准的有效区域（精铸可提升到当前最高）
 		"stats": { "atk": 0, "def": 0, "hp": 0 },
 		"affixes": [],
 		"value": roundi(rarity_data.base_value * (1.0 + eff * 0.4) * (0.9 + entry.grade * 0.1)),
@@ -151,14 +152,57 @@ static func _generate_stats(item: Dictionary, slot: String, eff: int, mult: floa
 			item.stats.def = roundi((1.0 + eff * 0.8) * mult)
 			item.stats.hp = roundi((4.0 + eff * 4.0) * mult)
 
+## 连击体系词条只允许出现在弓或配饰上
+static func combo_affix_allowed(item: Dictionary) -> bool:
+	return str(item.get("slot", "")) == "accessory" or str(item.get("key", "")) == "bow"
+
 static func _generate_affixes(item: Dictionary, rarity: int) -> void:
 	var n = GameData.RARITY_DATA[rarity].max_affixes
 	if n <= 0:
 		return
 	var pool = GameData.AFFIX_KEYS.duplicate()
+	if not combo_affix_allowed(item):
+		for k in GameData.COMBO_AFFIXES:
+			pool.erase(k)
 	pool.shuffle()
 	for i in range(min(n, pool.size())):
 		item.affixes.append(pool[i])
+
+# ------------------------------------------------------------
+# 区域基准数值（精铸制度）
+# 与 _generate_stats 同公式但去掉随机浮动 → 某品质/品级装备在
+# 指定有效区域下"应有"的标准基础数值
+# ------------------------------------------------------------
+static func baseline_stats(item: Dictionary, eff: int) -> Dictionary:
+	var rar = clampi(int(item.get("rarity", 0)), GameData.Rarity.COMMON, GameData.Rarity.LEGENDARY)
+	var mult: float = GameData.RARITY_DATA[rar].mult * ItemCatalogScript.grade_mult(int(item.get("grade", 1)))
+	var st = { "atk": 0, "def": 0, "hp": 0 }
+	match str(item.get("slot", "")):
+		"weapon":
+			var adj: float = CLASS_ATK_ADJUST.get(str(item.get("key", "sword")), 1.0)
+			st.atk = maxi(1, roundi((5.0 + eff * 3.2) * mult * adj))
+		"armor":
+			st.def = maxi(1, roundi((2.0 + eff * 1.6) * mult))
+			st.hp = roundi((8.0 + eff * 7.0) * mult)
+		"helmet":
+			st.def = maxi(1, roundi((1.0 + eff * 0.8) * mult))
+			st.hp = roundi((5.0 + eff * 3.5) * mult)
+		"pants":
+			st.def = maxi(1, roundi((1.5 + eff * 1.0) * mult))
+			st.hp = roundi((6.0 + eff * 4.0) * mult)
+		"boots":
+			st.def = maxi(1, roundi((1.0 + eff * 0.6) * mult))
+			st.hp = roundi((4.0 + eff * 2.5) * mult)
+		"accessory":
+			st.atk = roundi((1.0 + eff * 1.2) * mult)
+			st.def = roundi((1.0 + eff * 0.8) * mult)
+			st.hp = roundi((4.0 + eff * 4.0) * mult)
+	return st
+
+## 精铸后的装备价值（与出厂公式一致）
+static func baseline_value(item: Dictionary, eff: int) -> int:
+	var rar = clampi(int(item.get("rarity", 0)), GameData.Rarity.COMMON, GameData.Rarity.LEGENDARY)
+	return roundi(GameData.RARITY_DATA[rar].base_value * (1.0 + eff * 0.4) * (0.9 + int(item.get("grade", 1)) * 0.1))
 
 static func _generate_name(item: Dictionary) -> void:
 	var prefix = GameData.EQUIP_PREFIXES[randi() % GameData.EQUIP_PREFIXES.size()]

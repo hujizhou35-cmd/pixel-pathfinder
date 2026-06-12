@@ -432,7 +432,9 @@ func _update_buttons() -> void:
 	var aname: String = atk_names.get(wkey, "攻击")
 	if wkey == "bow":
 		var stats_b = GameState.get_player_stats()
-		var arrows = int(GameData.COMBAT["bow_hits"]) + int(GameState.combat_state.get("bow_combo", 0)) + int(stats_b.get("multihit", 0))
+		var bonus_b = mini(int(GameData.COMBAT["multihit_cap"]),
+			int(GameState.combat_state.get("bow_combo", 0)) + int(stats_b.get("multihit", 0)))
+		var arrows = mini(int(GameData.COMBAT["max_attacks_per_action"]), int(GameData.COMBAT["bow_hits"]) + bonus_b)
 		aname = "连射×%d" % arrows
 	_btn_attack.text = ("%s [1]" % aname) if atk_cd <= 0 else ("%s 冷却(%d)" % [aname, atk_cd])
 	_btn_attack.disabled = not can or atk_cd > 0

@@ -80,7 +80,19 @@ func _run() -> void:
 
 	GameState.start_new_game(0, "图鉴骑士", { "vit": 4, "str": 3, "tough": 2, "agi": 1 })
 	await _wait(0.8)
-	await _shot("02c_cg_region_enter")
+	await _shot("02c_cg_intro1")
+	# 翻到序章后段与区域进入 CG（验证字幕暗带淡化后可读性）
+	for i in range(4):
+		main_node.cg_layer._on_next()
+		await _wait(0.1)
+		main_node.cg_layer._on_next()   # 第一次补全字幕，第二次翻页
+		await _wait(0.3)
+	await _shot("02d_cg_intro5")
+	main_node.cg_layer._on_next()
+	await _wait(0.1)
+	main_node.cg_layer._on_next()
+	await _wait(0.5)
+	await _shot("02e_cg_region_enter")
 	main_node.cg_layer.skip_all()
 	await _wait(0.3)
 	await _shot("03_map")
@@ -164,10 +176,18 @@ func _run() -> void:
 	await _shot("09c_perk_choice")
 	modal.close_all()
 
-	# 图鉴：装备库 / 机制页 / 怪物 / 元素
+	# 图鉴：装备库 / 搜索 / 机制页 / 怪物 / 元素
 	SignalBus.show_modal.emit("codex", { "tab": "equip" })
 	await _wait(0.5)
 	await _shot("10_codex_equip100")
+	modal.close_all()
+	SignalBus.show_modal.emit("codex", { "tab": "equip", "query": "连击", "q": "连击" })
+	await _wait(0.5)
+	await _shot("10a_codex_search")
+	modal.close_all()
+	SignalBus.show_modal.emit("codex", { "tab": "monster", "locate": "史莱姆" })
+	await _wait(0.6)
+	await _shot("10a2_codex_locate")
 	modal.close_all()
 	SignalBus.show_modal.emit("codex", { "tab": "mech" })
 	await _wait(0.4)

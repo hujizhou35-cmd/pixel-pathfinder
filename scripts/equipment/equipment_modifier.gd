@@ -365,9 +365,9 @@ static func format_upgrade_preview(item: Dictionary) -> String:
 ## 武器职业说明（剑/斧/弓差异 + 先后手特性）
 static func weapon_class_desc(key: String) -> String:
 	match key:
-		"axe": return "斧：伤害 ×1.55，攻击后冷却 1 回合（空档可防御蓄势）；盾击后手"
-		"bow": return "弓：每回合 2 箭起步，每箭 ×0.62 独立触发特效（连击/贯连词条可加箭）；盾击后手"
-		"sword": return "剑：标准攻击无冷却，且盾击先手发动（剑专属）"
+		"axe": return "斧：伤害 ×1.7，命中附破甲（敌防御 -15%/层·叠2层·持续2回合），攻击后冷却 1 回合；盾击后手"
+		"bow": return "弓：每回合 2 箭起步，每箭 ×0.4 独立触发特效；连击/贯连词条仅对弓生效（连击上限 5，总攻击数上限 10）；盾击后手"
+		"sword": return "剑：标准攻击无冷却，盾击先手且护盾 +50%（剑专属）；护盾在身时普攻 +20%"
 	return ""
 
 ## 装备说明行（信息结构：核心战斗信息在前，套装效果挪到最后）
@@ -407,6 +407,14 @@ static func format_affixes(item: Dictionary) -> Array:
 	var invested: int = int(item.get("invested", 0))
 	if invested > 0:
 		lines.append("◇ 已投入强化 %d 金 · 出售时返还 50%%（+%d 金）" % [invested, roundi(invested * GameData.COMBAT["sell_refund_pct"])])
+
+	# 区域基准（精铸制度）：史诗+装备可精铸到当前最高区域基准
+	if int(item.get("rarity", 0)) >= GameData.Rarity.EPIC and GameState:
+		var te: int = int(item.get("tier_eff", 0))
+		if te < GameState.best_eff:
+			lines.append("◇ 区域基准 %d / 当前最高 %d —— 可在背包消耗 %d 精粹精铸提升基础数值" % [te + 1, GameState.best_eff + 1, int(GameData.COMBAT["refine_cost"])])
+		else:
+			lines.append("◇ 区域基准 %d（已是当前最高）" % (te + 1))
 
 	# 套装信息放最后（不挡核心信息）
 	var pfx = str(item.get("prefix", ""))

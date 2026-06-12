@@ -333,7 +333,7 @@ func _bag_filter_match(item: Dictionary, filter: String) -> bool:
 
 func _build_bag(c: VBoxContainer) -> void:
 	_title(c, "背 包")
-	_text(c, "金币: %d   ·   容量 %d/%d   ·   药水 ×%d" % [GameState.gold, GameState.bag.size(), GameData.PLAYER_BASE["bag_capacity"], GameState.potions], 15, UITheme.C_TEXT_DIM)
+	_text(c, "金币: %d   ·   容量 %d/%d   ·   药水 ×%d   ·   精粹 ×%d" % [GameState.gold, GameState.bag.size(), GameData.PLAYER_BASE["bag_capacity"], GameState.potions, GameState.refine_dust], 15, UITheme.C_TEXT_DIM)
 
 	# 分类页签 + 整理
 	var filter: String = str(_current_data.get("filter", "all"))
@@ -393,6 +393,7 @@ func _build_bag(c: VBoxContainer) -> void:
 			up.disabled = GameState.gold < cost
 		else:
 			_text(r, "已满级 +5", 14, UITheme.C_GOLD, false, 100.0)
+		_refine_button(r, it, { "kind": "equip", "slot": s })
 
 	# 背包物品（按当前分类过滤；每件都可查看完整详情）
 	var bag_lbl = Label.new()
@@ -433,12 +434,19 @@ func _build_bag(c: VBoxContainer) -> void:
 			GameState.sell_bag_item(idx)
 			Sfx.play("coin")
 		, 130.0)
+		# 分解：销毁装备获得精粹（普1/稀3/史8/传20），用于精铸
+		var dust = GameData.dust_gain(int(it.rarity))
+		var dis = _btn(r, "分解(+%d)" % dust, func():
+			GameState.dismantle_bag_item(idx)
+		, 92.0)
+		dis.tooltip_text = "销毁该装备，获得 %d 精粹（精铸史诗/传说装备需 %d 精粹）" % [dust, int(GameData.COMBAT["refine_cost"])]
 		# 熔炼：史诗+且有词条的装备可随机萃取词条精华（收费）
 		if GameState.can_smelt(it):
 			var sm = _btn(r, "熔炼", func():
 				SignalBus.show_modal.emit("smelt", { "index": idx })
 			, 80.0)
 			sm.tooltip_text = "花费 %d 金销毁该装备，随机萃取其一条词条为精华（可锻打到其他装备上）" % int(GameData.COMBAT["smelt_cost"])
+		_refine_button(r, it, { "kind": "bag", "index": idx })
 	if shown == 0:
 		_text(inner, "(该分类下没有物品)", 14, UITheme.C_TEXT_DIM)
 
@@ -479,6 +487,26 @@ func _build_bag(c: VBoxContainer) -> void:
 
 	var brow = _btn_row(c)
 	_btn(brow, "关闭 [Esc]", close, 160.0)
+
+## 精铸按钮：史诗+装备且基准低于当前最高区域时显示
+func _refine_button(r: Control, it: Dictionary, target: Dictionary) -> void:
+	if not GameState.can_refine(it):
+		return
+	var cost = int(GameData.COMBAT["refine_cost"])
+	var preview = EquipmentFactory.baseline_stats(it, GameState.best_eff)
+	var b = _btn(r, "精铸(%d精粹)" % cost, func():
+		GameState.refine_item(target)
+	, 116.0)
+	var parts = []
+	if preview.atk > 0:
+		parts.append("攻击 %d→%d" % [int(it.stats.atk), int(preview.atk)])
+	if preview.def > 0:
+		parts.append("防御 %d→%d" % [int(it.stats.def), int(preview.def)])
+	if preview.hp > 0:
+		parts.append("生命 %d→%d" % [int(it.stats.hp), int(preview.hp)])
+	b.tooltip_text = "提升基础数值至当前最高区域基准（强化等级与词条不变）：%s" % " · ".join(parts)
+	b.disabled = GameState.refine_dust < cost
+	b.add_theme_color_override("font_color", Color("#7ad9ff"))
 
 # ------------------------------------------------------------
 # 宝箱
@@ -688,7 +716,7 @@ func _build_help(c: VBoxContainer) -> void:
 		"◆ 战斗节点可先侦察：怪物数量、风格、词条、精确数值一目了然。",
 		"◆ 战斗：攻击[1] · 盾击[2]（冷却3·默认后手）· 防御[3]（冷却2）· 药水[4]（冷却3）。",
 		"◆ 先后手：普攻/防御/药水先手；盾击后手（剑/疾盾词条豁免）；「先手」怪总是抢先。",
-		"◆ 武器差异：剑盾击先手 / 斧 ×1.55 攻击后冷却 / 弓多箭齐发（连击/贯连词条可加箭）。",
+		"◆ 武器差异：剑盾击先手+护盾增伤 / 斧 ×1.7 破甲、攻击后冷却 / 弓多箭齐发（连击词条仅弓生效，上限 5）。",
 		"◆ 护盾有上限：总量不超过最大生命 40%，详见图鉴「机制」页。",
 		"◆ 锻打强化：同词条精华锻打到已有该词条的装备上 → 词条升级（最高 Lv.3，数值翻倍/三倍）。",
 		"◆ 元素：闪电克森林·森林克大地·大地克寒冰·寒冰克焰火·焰火克闪电，克制 ×1.3。",
@@ -696,8 +724,11 @@ func _build_help(c: VBoxContainer) -> void:
 		"◆ 新存档：给角色起名并分配 10 点天赋；通关区域 2 / 区域 5 后各三选一天赋词条（周目同样），上限 5 条、超出可替换。",
 		"◆ 熔炼（40金）随机萃取词条精华 → 锻打到其他装备；同词条=强化；也可花 40 金消除词条腾位。",
 		"◆ 词条上限随稀有度：稀有 2 条 / 史诗 3 条 / 传说 4 条。",
-		"◆ 掉落：精英 90% 稀有 10% 史诗；首领 90% 史诗 10% 传奇——传奇极其珍贵。",
+		"◆ 掉落：精英 70% 稀有 30% 史诗；首领 70% 史诗 30% 传奇。",
+		"◆ 精铸：分解装备得精粹（普1/稀3/史8/传20），花 5 精粹把史诗/传说装备的基础数值提到当前最高区域基准。",
+		"◆ 换区不重置：同一周目内各区域的关卡记录都会保留；只有阵亡才重置当前区域。",
 		"◆ 背包 32 格：可按 武器/衣物/配饰 分类查看，一键整理。",
+		"◆ 图鉴搜索：图鉴顶部输入关键词可定位条目位置。",
 		"◆ 阵亡损失一半金币，装备保留；进度随时自动保存（3 个存档位）。",
 		"◆ 快捷键：B 背包 · C 图鉴 · V 属性 · Esc 关闭窗口。",
 	]
@@ -946,7 +977,7 @@ func _build_stats(c: VBoxContainer) -> void:
 	if ae != "":
 		elem_parts.append("铠甲元素〔%s〕" % GameData.element_name(ae))
 	if GameState.cycle > 0:
-		elem_parts.append("强化 %d 周目（怪物 +%d%% 生命/+%d%% 攻击）" % [GameState.cycle, roundi(GameState.cycle * 55.0), roundi(GameState.cycle * 45.0)])
+		elem_parts.append("强化 %d 周目（怪物按区域 +%d 成长）" % [GameState.cycle, GameState.cycle * 5])
 	if elem_parts.size() > 0:
 		_text(c, " · ".join(elem_parts), 14, Color("#9fd6ff"))
 
@@ -991,6 +1022,28 @@ func _build_codex(c: VBoxContainer) -> void:
 	_title(c, "远 征 图 鉴")
 	var tab: String = _current_data.get("tab", "equip")
 
+	# 搜索框：输入关键词定位图鉴内容；也接受隐藏指令
+	var search_row = HBoxContainer.new()
+	search_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	search_row.add_theme_constant_override("separation", 8)
+	c.add_child(search_row)
+	var search_edit = LineEdit.new()
+	search_edit.custom_minimum_size = Vector2(320, 34)
+	search_edit.placeholder_text = "搜索图鉴关键词（如：连击 / 护盾 / 史莱姆）"
+	search_edit.text = str(_current_data.get("q", ""))
+	search_edit.text_changed.connect(func(t): _current_data["q"] = t)
+	search_edit.text_submitted.connect(func(t): _codex_do_search(t))
+	search_row.add_child(search_edit)
+	_btn(search_row, "搜索", func():
+		_codex_do_search(str(_current_data.get("q", "")))
+	, 80.0)
+	if str(_current_data.get("query", "")) != "":
+		_btn(search_row, "清除", func():
+			_current_data.erase("query")
+			_current_data["q"] = ""
+			_rebuild()
+		, 80.0)
+
 	# 分页按钮
 	var tabs = _btn_row(c)
 	var tab_defs = [["equip", "装备库"], ["affix", "词条·套装"], ["mech", "机制"], ["perk", "天赋"], ["monster", "怪物"], ["boss", "首领"], ["event", "事件"], ["element", "元素·药水"]]
@@ -998,9 +1051,11 @@ func _build_codex(c: VBoxContainer) -> void:
 		var tkey = td[0]
 		var b = _btn(tabs, td[1], func():
 			_current_data["tab"] = tkey
+			_current_data.erase("query")
+			_current_data.erase("locate")
 			_rebuild()
 		, 100.0)
-		if tkey == tab:
+		if tkey == tab and str(_current_data.get("query", "")) == "":
 			b.add_theme_color_override("font_color", UITheme.C_GOLD)
 			b.add_theme_stylebox_override("normal", UITheme.flat_box(Color("#2f3a58"), UITheme.C_GOLD, 2, 8, 6))
 
@@ -1012,18 +1067,173 @@ func _build_codex(c: VBoxContainer) -> void:
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(v)
 
-	match tab:
-		"equip":   _codex_equip(v)
-		"affix":   _codex_affix(v)
-		"mech":    _codex_mechanics(v)
-		"perk":    _codex_perks(v)
-		"monster": _codex_monsters(v)
-		"boss":    _codex_bosses(v)
-		"event":   _codex_events(v)
-		"element": _codex_element(v)
+	var query: String = str(_current_data.get("query", ""))
+	if query != "":
+		_codex_search_results(v, query)
+	else:
+		match tab:
+			"equip":   _codex_equip(v)
+			"affix":   _codex_affix(v)
+			"mech":    _codex_mechanics(v)
+			"perk":    _codex_perks(v)
+			"monster": _codex_monsters(v)
+			"boss":    _codex_bosses(v)
+			"event":   _codex_events(v)
+			"element": _codex_element(v)
+		# 搜索跳转：滚动到包含定位文本的条目并高亮
+		var locate: String = str(_current_data.get("locate", ""))
+		if locate != "":
+			_current_data.erase("locate")
+			_codex_scroll_to(scroll, v, locate)
 
 	var r = _btn_row(c)
 	_btn(r, "关闭 [Esc]", close, 150.0)
+
+# ------------------------------------------------------------
+# 图鉴搜索：关键词索引 + 结果跳转；隐藏指令 drug/heart/money+数字
+# ------------------------------------------------------------
+func _codex_do_search(q: String) -> void:
+	q = q.strip_edges()
+	if q == "":
+		_current_data.erase("query")
+		_rebuild()
+		return
+	# 隐藏指令
+	if GameState.apply_cheat(q):
+		Sfx.play("upgrade")
+		_current_data["q"] = ""
+		_current_data.erase("query")
+		_rebuild()
+		return
+	_current_data["query"] = q
+	_rebuild()
+
+const CODEX_TAB_NAMES = {
+	"equip": "装备库", "affix": "词条·套装", "mech": "机制", "perk": "天赋",
+	"monster": "怪物", "boss": "首领", "event": "事件", "element": "元素·药水",
+}
+
+## 全图鉴关键词索引：返回 [{tab, label, locate}]
+func _codex_search_index(q: String) -> Array:
+	var out = []
+	var seen = {}
+	var add = func(tab: String, label: String, locate: String):
+		var k = tab + "|" + locate
+		if not seen.has(k):
+			seen[k] = true
+			out.append({ "tab": tab, "label": label, "locate": locate })
+	# 装备库（按基底）
+	for entry in ItemCatalog.all_entries():
+		var hay = "%s %s %s %s" % [entry.name, entry.base, entry.kind, entry.trait_desc]
+		if hay.findn(q) >= 0:
+			add.call("equip", "装备 · %s（%s）" % [entry.base, entry.kind], str(entry.base))
+	# 词条
+	for ak in GameData.AFFIX_KEYS:
+		var a = GameData.AFFIXES[ak]
+		if ("%s %s" % [a.name, a.desc]).findn(q) >= 0:
+			add.call("affix", "词条 · %s — %s" % [a.name, a.desc], str(a.name))
+	# 套装
+	for p in GameData.EQUIP_PREFIXES:
+		if GameData.SET_BONUSES.has(p):
+			var sb = GameData.SET_BONUSES[p]
+			if ("%s %s %s %s" % [p, sb.name, sb.two.desc, sb.three.desc]).findn(q) >= 0:
+				add.call("affix", "套装 · %s·%s" % [p, sb.name], "%s·%s" % [p, sb.name])
+	# 机制（卡片标题）
+	var mech_cards = [
+		"一、先后手判定", "二、行动结算细节", "三、护盾体系", "四、连击体系",
+		"五、熔炼与锻打", "六、精铸与分解", "七、叠加规则速查",
+		"先手 后手 盾击 防御 药水 攻击 冷却", "护盾 上限 穿透", "连击 贯连 迅捷 连环 弓",
+		"熔炼 锻打 词条 精华 消除", "精铸 分解 精粹 基准 区域效能",
+	]
+	var mech_anchor = ["一、先后手判定", "二、行动结算细节", "三、护盾体系", "四、连击体系",
+		"五、熔炼与锻打", "六、精铸与分解", "七、叠加规则速查",
+		"一、先后手判定", "三、护盾体系", "四、连击体系", "五、熔炼与锻打", "六、精铸与分解"]
+	for i in range(mech_cards.size()):
+		if mech_cards[i].findn(q) >= 0:
+			add.call("mech", "机制 · %s" % mech_anchor[i], mech_anchor[i])
+	# 天赋
+	for tk in GameData.TALENT_KEYS:
+		var td = GameData.TALENTS[tk]
+		if ("%s %s" % [td.name, td.desc]).findn(q) >= 0:
+			add.call("perk", "开局天赋 · %s — %s" % [td.name, td.desc], str(td.name))
+	for pk in GameData.PERK_KEYS:
+		var pd = GameData.PERKS[pk]
+		if ("%s %s" % [pd.name, pd.desc]).findn(q) >= 0:
+			add.call("perk", "天赋词条 · %s — %s" % [pd.name, pd.desc], str(pd.name))
+	# 怪物与词条
+	for ek in GameData.ENEMY_TYPES:
+		var t = GameData.ENEMY_TYPES[ek]
+		if str(t.name).findn(q) >= 0:
+			add.call("monster", "怪物 · %s" % t.name, str(t.name))
+	for mk in GameData.MONSTER_AFFIX_KEYS:
+		var ma = GameData.MONSTER_AFFIXES[mk]
+		if ("%s %s" % [ma.name, ma.desc]).findn(q) >= 0:
+			add.call("monster", "怪物词条 · %s — %s" % [ma.name, ma.desc], str(ma.name))
+	# 首领
+	for ri in range(GameData.BIOMES.size()):
+		var biome = GameData.BIOMES[ri]
+		if ("%s %s" % [biome.boss.name, biome.name]).findn(q) >= 0:
+			add.call("boss", "首领 · 区域 %d %s" % [ri + 1, biome.boss.name], str(biome.boss.name))
+	# 事件
+	for ev in GameData.EVENT_POOL:
+		if ("%s %s" % [ev.title, ev.desc]).findn(q) >= 0:
+			add.call("event", "事件 · %s" % ev.title, str(ev.title))
+	# 元素与药水
+	for elk in GameData.ELEMENT_KEYS:
+		var ed = GameData.ELEMENTS[elk]
+		if ("%s %s %s %s" % [ed.name, ed.item_word, ed.proc_name, ed.proc_desc]).findn(q) >= 0:
+			add.call("element", "元素 · %s（触发「%s」）" % [ed.name, ed.proc_name], str(ed.name))
+	if ("%s %s" % [GameData.POTION_INFO.name, GameData.POTION_INFO.desc]).findn(q) >= 0:
+		add.call("element", "道具 · %s" % GameData.POTION_INFO.name, str(GameData.POTION_INFO.name))
+	return out
+
+func _codex_search_results(v: VBoxContainer, q: String) -> void:
+	var results = _codex_search_index(q)
+	_codex_line(v, "", "搜索「%s」：共 %d 条结果，点击条目跳转到对应位置。" % [q, results.size()], UITheme.C_GOLD)
+	if results.is_empty():
+		_codex_line(v, "", "没有找到相关内容。试试：连击 / 护盾 / 破甲 / 精铸 / 套装 / 怪物名……", UITheme.C_TEXT_DIM)
+		return
+	for res in results.slice(0, 40):
+		var tabk: String = str(res.tab)
+		var loc: String = str(res.locate)
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		v.add_child(row)
+		var b = _btn(row, "▶ %s" % str(res.label), func():
+			_current_data.erase("query")
+			_current_data["tab"] = tabk
+			_current_data["locate"] = loc
+			_rebuild()
+		, 480.0)
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var tag = Label.new()
+		tag.text = "〔%s〕" % CODEX_TAB_NAMES.get(tabk, tabk)
+		tag.add_theme_font_size_override("font_size", 13)
+		tag.add_theme_color_override("font_color", UITheme.C_TEXT_DIM)
+		tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(tag)
+
+## 滚动到第一个包含定位文本的标签并高亮
+func _codex_scroll_to(scroll: ScrollContainer, root: Control, needle: String) -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not is_instance_valid(scroll) or not is_instance_valid(root):
+		return
+	var lbl = _find_label_with(root, needle)
+	if lbl == null:
+		return
+	lbl.add_theme_color_override("font_color", UITheme.C_GOLD)
+	var y = lbl.get_global_rect().position.y - root.get_global_rect().position.y
+	scroll.scroll_vertical = maxi(0, int(y) - 60)
+
+func _find_label_with(node: Node, needle: String):
+	if node is Label and str(node.text).findn(needle) >= 0:
+		return node
+	for ch in node.get_children():
+		var found = _find_label_with(ch, needle)
+		if found != null:
+			return found
+	return null
 
 func _codex_card(parent: Control, head: String, head_color: Color) -> VBoxContainer:
 	var card = PanelContainer.new()
@@ -1053,9 +1263,9 @@ func _codex_equip(v: VBoxContainer) -> void:
 	_codex_line(v, "", "装备库共 %d 件：35 个基底 × 五大元素（焰火/寒冰/大地/闪电/森林），覆盖武器/铠甲/头盔/裤子/鞋/配饰六个部位。品级随区域与周目解锁；稀有度（普通<稀有<史诗<传说）决定数值与词条数。" % entries.size(), UITheme.C_TEXT)
 	# 武器职业差异
 	var wc_card = _codex_card(v, "武器职业差异（含先后手）", UITheme.C_GOLD)
-	_codex_line(wc_card, "剑", "标准攻击无冷却，盾击先手发动（剑专属） — 均衡", UITheme.C_GREEN)
-	_codex_line(wc_card, "斧", "伤害 ×1.55，攻击后冷却 1 回合 — 配合蓄势/处决打一击流", UITheme.C_GREEN)
-	_codex_line(wc_card, "弓", "每回合 2 箭起步、每箭 ×0.62 独立触发特效；搭配「连击/贯连」词条可不断加箭 — 连击/吸血流", UITheme.C_GREEN)
+	_codex_line(wc_card, "剑", "标准攻击无冷却；盾击先手且护盾 +50%（剑专属）；护盾在身时普攻 +20% — 攻防一体", UITheme.C_GREEN)
+	_codex_line(wc_card, "斧", "伤害 ×1.7，命中附破甲（防御 -15%/层·叠 2 层），攻击后冷却 1 回合 — 配合蓄势/处决打一击流、克高防", UITheme.C_GREEN)
+	_codex_line(wc_card, "弓", "每回合 2 箭起步、每箭 ×0.4 独立触发特效；「连击/贯连」词条仅对弓生效（连击上限 5、总攻击上限 10）— 连击/吸血流", UITheme.C_GREEN)
 
 	# 按基底分组列出 100 件
 	var last_base = ""
@@ -1134,8 +1344,8 @@ func _codex_mechanics(v: VBoxContainer) -> void:
 	_codex_line(order_card, "眩晕优先", "被「震慑」眩晕的怪物轮到行动时直接跳过（含先手怪的抢先行动）。")
 
 	var act_card = _codex_card(v, "二、行动结算细节", UITheme.C_GOLD)
-	_codex_line(act_card, "攻击", "剑：1 次全额攻击，无冷却。斧：1 次 ×%.2f 攻击，攻击后冷却 %d 回合。弓：%d 箭起步，每箭 ×%.2f，且每箭独立判定暴击与命中特效。" % [C.axe_dmg_mult, C.axe_cooldown, C.bow_hits, C.bow_hit_mult])
-	_codex_line(act_card, "盾击", "对单体造成 ×%.2f 伤害并获得护盾（%d + 防御×%.1f），冷却 %d 回合；「盾势」词条每级冷却 -1（最低 1）。" % [C.skill_dmg_mult, C.base_skill_shield, C.skill_shield_def_mult, C.skill_cooldown])
+	_codex_line(act_card, "攻击", "剑：1 次全额攻击，无冷却，护盾在身时伤害 +%d%%。斧：1 次 ×%.2f 攻击并附加破甲（防御 -%d%%/层·最多 %d 层·持续 %d 回合），攻击后冷却 %d 回合。弓：%d 箭起步，每箭 ×%.2f，且每箭独立判定暴击与命中特效。" % [roundi(C.sword_shield_atk_pct * 100), C.axe_dmg_mult, roundi(C.axe_sunder_pct * 100), C.axe_sunder_stacks, C.axe_sunder_turns, C.axe_cooldown, C.bow_hits, C.bow_hit_mult])
+	_codex_line(act_card, "盾击", "对单体造成 ×%.2f 伤害并获得护盾（%d + 防御×%.1f；剑获得的护盾 ×1.5），冷却 %d 回合；「盾势」词条每级冷却 -1（最低 1）。" % [C.skill_dmg_mult, C.base_skill_shield, C.skill_shield_def_mult, C.skill_cooldown])
 	_codex_line(act_card, "防御", "获得护盾（%d + 防御×%.1f），冷却 %d 回合；带「蓄势」词条时每次防御 +1 层（最多 3 层），下次攻击每层 +30%% 伤害，攻击后清零。" % [C.base_def_shield, C.def_shield_def_mult, C.defend_cooldown])
 	_codex_line(act_card, "药水", "恢复 40%% 最大生命，战斗内冷却 %d 回合；「药理」词条恢复 +15%%/级 且冷却 -1。" % C.potion_cooldown)
 	_codex_line(act_card, "伤害公式", "你受到的伤害 = 敌攻 × 元素系数 − 防御×%.1f，再依次结算：闪避 → 完全格挡 → 减伤%% → 减半格挡 → 护盾吸收 → 扣血。" % C.def_dmg_reduction)
@@ -1148,10 +1358,12 @@ func _codex_mechanics(v: VBoxContainer) -> void:
 	_codex_line(shield_card, "穿透", "怪物「穿甲」词条的攻击直接无视你的护盾；你的「雷击」元素触发同样无视敌方护盾。")
 	_codex_line(shield_card, "敌方护盾", "怪物护盾随周目 +%d%%/周目；先打掉护盾才会掉血（灼烧无视护盾直接烧血）。" % roundi(C.cycle_enemy_shield_mult * 100))
 
-	var combo_card = _codex_card(v, "四、连击体系（词条驱动）", Color("#bd6fff"))
-	_codex_line(combo_card, "连击数", "「连击」词条每级使连击数 +1：弓多射一箭（全额 ×%.2f）；剑/斧追加一次 ×%.1f 伤害的攻击。" % [C.bow_hit_mult, C.extra_hit_dmg_mult])
-	_codex_line(combo_card, "贯连", "「贯连」词条 / 「连击之道」天赋：本次行动每出现一次暴击，本场战斗连击数 +1（每级 +1，上限 +%d）。战斗结束清零。注意：弓不再自带此效果，需要自行搭配。" % C.bow_combo_cap, Color("#ff9b8a"))
-	_codex_line(combo_card, "迅捷", "「迅捷」词条是独立的概率追击（15%%/级，×%.1f 伤害），与连击数互不影响，可叠加。" % C.extra_hit_dmg_mult)
+	var combo_card = _codex_card(v, "四、连击体系（仅弓生效）", Color("#bd6fff"))
+	_codex_line(combo_card, "仅限弓", "连击体系只对弓生效：「连击」「贯连」词条只会出现在弓或配饰上，且装备剑/斧时这些词条无效。", Color("#ff9b8a"))
+	_codex_line(combo_card, "连击数", "「连击」词条每级使弓多射一箭（全额 ×%.2f）；连击数（词条+贯连累计）上限 %d。" % [C.bow_hit_mult, C.multihit_cap])
+	_codex_line(combo_card, "贯连", "「贯连」词条 / 「连击之道」天赋：本次行动每出现一次暴击，本场战斗连击数 +1（每级 +1，上限 +%d）。战斗结束清零。" % C.bow_combo_cap)
+	_codex_line(combo_card, "迅捷", "「迅捷」词条是独立的概率追击（15%%/级，×%.1f 伤害，可连续触发），任何武器都可用，与连击数互不影响。" % C.extra_hit_dmg_mult)
+	_codex_line(combo_card, "总上限", "单次行动的总攻击数（基础箭 + 连击 + 迅捷追击）不会超过 %d 次。" % C.max_attacks_per_action, Color("#ff9b8a"))
 	_codex_line(combo_card, "连环", "「连环」词条让第 2 箭/追加攻击伤害 +25%/级，放大一切多段攻击。")
 	_codex_line(combo_card, "触发关系", "每一箭/每次追击都独立判定：暴击、元素触发（%d%%+触发率加成）、震慑、燃焰、吸血——攻击段数越多，特效期望越高。" % roundi(C.elem_proc_chance))
 
@@ -1161,8 +1373,15 @@ func _codex_mechanics(v: VBoxContainer) -> void:
 	_codex_line(forge_card, "同词条强化", "把精华打到已有同词条的装备上 → 词条升级（最高 Lv.%d）：数值词条按等级倍增（如连击 Lv.2 = 连击数 +2，精准 Lv.2 = 暴击率 +20%%）。" % GameData.AFFIX_MAX_LEVEL, UITheme.C_GREEN)
 	_codex_line(forge_card, "消除词条", "可花费 %d 金移除装备上的一条词条（背包 → 消除词条），为锻打新词条腾出位置。" % int(C.purge_cost), UITheme.C_GREEN)
 	_codex_line(forge_card, "不可强化", "开关型词条（蓄势/疾盾/盾转攻/攻转盾）只有开或关，无法升级。")
+	_codex_line(forge_card, "限制", "连击体系词条（连击/贯连）只能锻打到弓或配饰上。", Color("#ff9b8a"))
 
-	var stack_card = _codex_card(v, "六、叠加规则速查", UITheme.C_GOLD)
+	var refine_card = _codex_card(v, "六、精铸与分解（区域效能）", Color("#7ad9ff"))
+	_codex_line(refine_card, "问题", "区域越深怪物越强，老装备的基础数值相对越来越弱。精铸制度让心爱的史诗/传说装备保值。", UITheme.C_TEXT)
+	_codex_line(refine_card, "分解", "背包中的装备可分解为「精粹」：普通 1 · 稀有 3 · 史诗 8 · 传说 20。")
+	_codex_line(refine_card, "区域基准", "每件装备带有出厂时的「区域基准」：该区域下此品质/品级装备应有的标准基础数值。")
+	_codex_line(refine_card, "精铸", "消耗 %d 精粹，把史诗/传说装备的基础数值提升到你到达过的最高区域基准（周目也计入：每周目相当于区域 +5）。强化等级与词条完全保留，最终输出 = 新基准 × (1 + 强化加成)。" % int(C.refine_cost), UITheme.C_GREEN)
+
+	var stack_card = _codex_card(v, "七、叠加规则速查", UITheme.C_GOLD)
 	_codex_line(stack_card, "可叠加", "同名词条出现在不同装备上时数值相加（如两件「精准」= 暴击率 +20%）；天赋、套装、基底特性与词条全部相加。")
 	_codex_line(stack_card, "百分比", "攻击/防御/生命的百分比加成（穿透、套装、天赋）先合计再统一乘算一次。")
 	_codex_line(stack_card, "元素", "武器克制敌人元素 ×1.3（符文 3 件套翻倍加成），被克 ×0.8；铠甲元素同理影响你的受击。")
@@ -1214,7 +1433,7 @@ func _codex_monsters(v: VBoxContainer) -> void:
 			var base_atk = roundi((10.0 + ri * 7.0) * t.atk_mult)
 			var base_def = roundi(2.0 + ri * 2.2)
 			var card = _codex_card(v, t.name, UITheme.C_TEXT)
-			_codex_line(card, "数值", "基准生命 %d · 基准攻击 %d · 基准防御 %d（精英 ×2.2 生命/×1.3 攻击/×1.3 防御；每周目生命 +55%%、攻击 +60%%、防御 +50%%）" % [base_hp, base_atk, base_def], Color("#9fd6ff"))
+			_codex_line(card, "数值", "基准生命 %d · 基准攻击 %d · 基准防御 %d（精英 ×2.2 生命/×1.3 攻击/×1.3 防御；每周目相当于区域 +5 继续成长——新周目区域 1 强于上周目区域 5）" % [base_hp, base_atk, base_def], Color("#9fd6ff"))
 			var st = GameData.get_enemy_style(key)
 			if str(st.get("name", "")) != "":
 				_codex_line(card, "风格", "%s — %s" % [st.name, st.desc], Color("#8aeb9a"))

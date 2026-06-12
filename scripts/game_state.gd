@@ -33,6 +33,11 @@ var bonus_max_hp: int = 0      # 事件带来的永久生命加成（本局有�
 # 熔炼词条精华：[{affix, from}]，锻打可赋予其他装备
 var essences: Array = []
 
+# 精粹（分解装备所得）：用于精铸装备到当前最高区域基准
+var refine_dust: int = 0
+# 本存档到达过的最高有效区域（区域 + 周目×5），精铸基准
+var best_eff: int = 0
+
 # 角色：名字 + 开局天赋点（每档存档独立）
 var hero_name: String = "冒险者"
 var talents: Dictionary = { "vit": 0, "str": 0, "tough": 0, "agi": 0 }
@@ -62,6 +67,8 @@ var bag: Array = []
 var current_map: Dictionary = {}
 var current_node_idx: int = -1
 var hero_pos: int = -1          # 小人当前所站节点 id；-1 = 起点（地图下方）
+# 同周目内各区域的地图进度（换区不重置；死亡只重置当前区域；新周目全部重置）
+var region_maps: Dictionary = {}   # region(int) -> {"map": Dictionary, "hero_pos": int}
 
 # 战斗
 var combat_state: Dictionary = {}
@@ -170,11 +177,15 @@ func start_new_game(start_region: int = 0, new_name: String = "", new_talents: D
 	potions = GameData.PLAYER_BASE["start_potions"]
 	region_buff = 0.0
 	bonus_max_hp = 0
+	refine_dust = 0
+	best_eff = 0
 	recent_events.clear()
 	essences.clear()
 	perks.clear()
 	seen_cgs.clear()
 	bag.clear()
+	region_maps.clear()
+	current_map = {}
 
 	# 角色名与天赋
 	hero_name = new_name.strip_edges()
@@ -206,22 +217,41 @@ func start_new_game(start_region: int = 0, new_name: String = "", new_talents: D
 	start_region(region)
 
 func start_region(r: int) -> void:
+	# 离开旧区域前保留其探索进度（同周目内换区不重置关卡）
+	if not current_map.is_empty():
+		var old_r = int(current_map.get("region", region))
+		region_maps[old_r] = { "map": current_map, "hero_pos": hero_pos }
 	region = r
+	best_eff = maxi(best_eff, r + cycle * 5)
 	current_node_idx = -1
-	hero_pos = -1
-	current_map = MapGenerator.generate_map(r, cycle)
+	# 本周目内来过该区域 → 恢复地图进度；否则生成新地图
+	var saved = region_maps.get(r)
+	if saved is Dictionary and saved.get("map") is Dictionary \
+			and int(saved.map.get("cycle", -1)) == cycle:
+		current_map = saved.map
+		hero_pos = int(saved.get("hero_pos", -1))
+	else:
+		hero_pos = -1
+		current_map = MapGenerator.generate_map(r, cycle)
+	region_maps[r] = { "map": current_map, "hero_pos": hero_pos }
 	change_state(State.MAP)
 	_recalc_stats()
 	hp = min(hp, max_hp)
 	SignalBus.region_changed.emit(r)
 	SignalBus.view_changed.emit("map")
 	save_game()
-	# 区域进入 CG（每存档每区域一次，地图就绪后叠加播放）
+	# 剧情 CG：新远征首次启程播放序章；区域进入 CG 每存档每区域一次
+	var cgs: Array = []
+	if not _cg_seen("intro"):
+		_mark_cg("intro")
+		cgs.append_array(GameData.CG_INTRO)
 	var cg_key = "enter_%d" % r
 	if r < GameData.CG_REGION_ENTER.size() and not _cg_seen(cg_key):
 		_mark_cg(cg_key)
+		cgs.append(GameData.CG_REGION_ENTER[r])
+	if cgs.size() > 0:
 		save_game()
-		SignalBus.play_cg.emit([GameData.CG_REGION_ENTER[r]], "enter")
+		SignalBus.play_cg.emit(cgs, "enter")
 
 ## 远征途中切换区域（全地图开放 · 测试模式）
 func switch_region(r: int) -> void:
@@ -341,6 +371,99 @@ func sell_bag_item(index: int) -> void:
 	save_game()
 
 # ============================================================
+# 精铸制度（区域效能）
+# 分解：销毁背包装备 → 精粹（普1/稀3/史8/传20）
+# 精铸：消耗 5 精粹，把史诗/传说装备的基础数值提升到
+#       当前最高区域的基准值（强化等级与词条不变）
+# ============================================================
+func dismantle_bag_item(index: int) -> bool:
+	if index < 0 or index >= bag.size():
+		return false
+	var it = bag[index]
+	var gain = GameData.dust_gain(int(it.get("rarity", 0)))
+	refine_dust += gain
+	bag.remove_at(index)
+	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.show_toast.emit("已分解「%s」：精粹 +%d（现有 %d）" % [str(it.get("name", it.get("base_name", "装备"))), gain, refine_dust])
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+## 是否可精铸：史诗+且出厂基准低于当前最高区域基准
+func can_refine(item: Dictionary) -> bool:
+	return int(item.get("rarity", 0)) >= GameData.Rarity.EPIC \
+		and int(item.get("tier_eff", 0)) < best_eff
+
+## target: {"kind":"equip","slot":...} 或 {"kind":"bag","index":...}
+func refine_item(target: Dictionary) -> bool:
+	var it = null
+	if target.get("kind", "") == "equip":
+		it = equipment.get(str(target.get("slot", "")))
+	elif target.get("kind", "") == "bag":
+		var bi = int(target.get("index", -1))
+		if bi >= 0 and bi < bag.size():
+			it = bag[bi]
+	if it == null or not can_refine(it):
+		return false
+	var cost = int(GameData.COMBAT["refine_cost"])
+	if refine_dust < cost:
+		SignalBus.show_toast.emit("精粹不足（精铸需要 %d，现有 %d）" % [cost, refine_dust])
+		return false
+	refine_dust -= cost
+	var old_atk = int(it.stats.atk)
+	it["stats"] = EquipmentFactory.baseline_stats(it, best_eff)
+	it["tier_eff"] = best_eff
+	it["value"] = EquipmentFactory.baseline_value(it, best_eff)
+	_recalc_stats()
+	hp = mini(hp, max_hp)
+	SignalBus.gold_changed.emit(gold)
+	SignalBus.hp_changed.emit(hp, max_hp)
+	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.equipment_changed.emit(str(it.get("slot", "weapon")), it)
+	if it.stats.atk > 0:
+		SignalBus.show_toast.emit("精铸完成：「%s」基础攻击 %d → %d" % [str(it.get("name", "装备")), old_atk, int(it.stats.atk)])
+	else:
+		SignalBus.show_toast.emit("精铸完成：「%s」基础数值已提升至当前区域基准" % str(it.get("name", "装备")))
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+# ============================================================
+# 图鉴搜索框隐藏指令：drug+N 药水变为 N / heart+N 生命上限变为 N /
+# money+N 获得 N 金币
+# ============================================================
+func apply_cheat(cmd: String) -> bool:
+	var q = cmd.strip_edges().to_lower()
+	for key in ["drug", "heart", "money"]:
+		if q.begins_with(key):
+			var num = q.substr(key.length()).strip_edges()
+			if num == "" or not num.is_valid_int():
+				return false
+			var n = int(num)
+			match key:
+				"drug":
+					potions = maxi(0, n)
+					SignalBus.potion_changed.emit(potions)
+					SignalBus.show_toast.emit("【秘术】治疗药水数量变为 %d" % potions)
+				"heart":
+					if n < 1:
+						return false
+					bonus_max_hp += n - max_hp
+					_recalc_stats()
+					hp = max_hp
+					SignalBus.hp_changed.emit(hp, max_hp)
+					SignalBus.show_toast.emit("【秘术】生命上限与生命变为 %d" % max_hp)
+				"money":
+					if n <= 0:
+						return false
+					add_gold(n)
+					SignalBus.show_toast.emit("【秘术】获得 %d 金币" % n)
+			Sfx.play("upgrade")
+			save_game()
+			return true
+	return false
+
+# ============================================================
 # 熔炼与锻打
 # 熔炼：销毁背包中史诗+装备，自选萃取其一条词条为「词条精华」
 # 锻打：花费金币把精华赋予任意装备（单件词条上限 4，不可重复）
@@ -419,6 +542,9 @@ static func affix_level_of(item: Dictionary, key: String) -> int:
 ## 同词条可强化（开关型除外，上限 Lv.3）
 ## 返回 {"ok": bool, "why": String, "to_lv": int}
 func can_forge_to(item: Dictionary, affix_key: String) -> Dictionary:
+	# 连击体系词条只能锻打到弓或配饰上
+	if GameData.COMBO_AFFIXES.has(affix_key) and not EquipmentFactory.combo_affix_allowed(item):
+		return { "ok": false, "why": "连击词条只能附着在弓或配饰上", "to_lv": 0 }
 	if item.affixes.has(affix_key):
 		if GameData.NON_STACK_AFFIXES.has(affix_key):
 			return { "ok": false, "why": "开关型词条无法强化", "to_lv": 0 }
@@ -882,11 +1008,13 @@ func _region_clear_after_cg() -> void:
 
 func _region_clear_continue() -> void:
 	if region >= GameData.BIOMES.size() - 1:
-		# 整轮通关 → 进入下一个强化周目
+		# 整轮通关 → 进入下一个强化周目（全部区域地图重置）
 		var cleared_cycle = cycle
 		var bonus = 200 + cycle * 120
 		gold += bonus
 		cycle += 1
+		region_maps.clear()
+		current_map = {}
 		SignalBus.gold_changed.emit(gold)
 		SignalBus.game_victory.emit()
 		# 先把新周目第 1 区准备好并保存：此刻退出也不丢进度
@@ -917,12 +1045,14 @@ func player_defeated() -> void:
 	gold -= lost
 	SignalBus.gold_changed.emit(gold)
 	# 预写一份"重整旗鼓"状态的存档：此刻退出游戏也能从区域起点继续
+	# 死亡只重置当前区域的关卡进度，其它区域的记录保留
 	_recalc_stats()
 	hp = max_hp
 	region_buff = 0.0
 	current_node_idx = -1
 	hero_pos = -1
 	current_map = MapGenerator.generate_map(region, cycle)
+	region_maps[region] = { "map": current_map, "hero_pos": -1 }
 	save_game(true)
 	SignalBus.show_modal.emit("defeat", { "region": region, "lost_gold": lost, "stats": run_stats.duplicate() })
 
@@ -1095,8 +1225,20 @@ func save_game(force: bool = false) -> void:
 	# 非地图状态只允许强制保存（避免覆盖"进节点前"的快照）
 	if not force and not (current_state in [State.MAP, State.TITLE]):
 		return
+	# 各区域地图进度（同周目内换区保留）
+	if not current_map.is_empty():
+		region_maps[int(current_map.get("region", region))] = { "map": current_map, "hero_pos": hero_pos }
+	var rmaps = {}
+	for rk in region_maps:
+		var rm = region_maps[rk]
+		if rm is Dictionary and rm.get("map") is Dictionary:
+			rmaps[str(rk)] = {
+				"nodes": rm.map.get("nodes", []),
+				"hero_pos": int(rm.get("hero_pos", -1)),
+				"cycle": int(rm.map.get("cycle", cycle)),
+			}
 	var data = {
-		"version": 5,
+		"version": 6,
 		"timestamp": Time.get_datetime_string_from_system(false, true),
 		"region": region,
 		"cycle": cycle,
@@ -1105,6 +1247,8 @@ func save_game(force: bool = false) -> void:
 		"hp": hp,
 		"region_buff": region_buff,
 		"bonus_max_hp": bonus_max_hp,
+		"refine_dust": refine_dust,
+		"best_eff": best_eff,
 		"recent_events": recent_events,
 		"essences": essences,
 		"hero_name": hero_name,
@@ -1114,6 +1258,7 @@ func save_game(force: bool = false) -> void:
 		"equipment": equipment,
 		"bag": bag,
 		"map_nodes": current_map.get("nodes", []),
+		"region_maps": rmaps,
 		"current_node_idx": current_node_idx,
 		"hero_pos": hero_pos,
 		"run_stats": run_stats,
@@ -1171,6 +1316,9 @@ func load_game(slot: int = -1) -> bool:
 	seen_cgs.clear()
 	for k in parsed.get("seen_cgs", []):
 		seen_cgs.append(str(k))
+	# 旧版本存档（无序章记录）视为已看过序章，避免读档后突然插播开场 CG
+	if not seen_cgs.has("intro"):
+		seen_cgs.append("intro")
 
 	equipment = {}
 	for slot_name in GameData.EQUIP_SLOTS:
@@ -1186,59 +1334,38 @@ func load_game(slot: int = -1) -> bool:
 		if it is Dictionary:
 			bag.append(_restore_item(it))
 
-	# 重建地图（节点 + 行结构，共享引用）
-	var nodes = []
-	for n in parsed.get("map_nodes", []):
-		if n is Dictionary:
-			var node = {
-				"id": int(n.get("id", 0)),
-				"row": int(n.get("row", 0)),
-				"col": int(n.get("col", 0)),
-				"type": int(n.get("type", 0)),
-				"visited": bool(n.get("visited", false)),
-				"next": [],
-				"foes": [],
-			}
-			for nx in n.get("next", []):
-				node.next.append(int(nx))
-			for foe in n.get("foes", []):
-				if foe is Dictionary:
-					var fa = []
-					for af in foe.get("affixes", []):
-						fa.append(str(af))
-					node.foes.append({
-						"key": str(foe.get("key", "slime")),
-						"elite": bool(foe.get("elite", false)),
-						"boss": bool(foe.get("boss", false)),
-						"affixes": fa,
-						"element": str(foe.get("element", "")),
-					})
-			# 旧版存档没有怪物构成 → 现场补掷
-			if node.foes.is_empty():
-				match node.type:
-					GameData.NodeType.BATTLE:
-						node.foes = CombatManager.roll_foes(region, cycle, false, false)
-					GameData.NodeType.ELITE:
-						node.foes = CombatManager.roll_foes(region, cycle, true, false)
-					GameData.NodeType.BOSS:
-						node.foes = CombatManager.roll_foes(region, cycle, false, true)
-			nodes.append(node)
+	# 重建当前区域地图（节点 + 行结构，共享引用）
+	var nodes = _parse_saved_nodes(parsed.get("map_nodes", []), region)
 	if nodes.is_empty():
 		return false
-	var max_row = 0
-	for n in nodes:
-		max_row = maxi(max_row, n.row)
-	var rows = []
-	for r in range(max_row + 1):
-		var row = []
-		for n in nodes:
-			if n.row == r:
-				row.append(n)
-		row.sort_custom(func(a, b): return a.col < b.col)
-		rows.append(row)
-	# 旧版存档地图没有节点连线 → 补织路线，避免小人无路可走卡死
-	MapGenerator.ensure_links(rows)
-	current_map = { "rows": rows, "nodes": nodes, "region": region, "cycle": cycle }
+	current_map = _map_from_nodes(nodes, region, cycle)
+
+	# 重建各区域地图进度（v6；旧档只有当前区域）
+	region_maps.clear()
+	var rmaps = parsed.get("region_maps", {})
+	if rmaps is Dictionary:
+		for rk in rmaps:
+			var rm = rmaps[rk]
+			if not (rm is Dictionary):
+				continue
+			var ri = int(str(rk))
+			if ri < 0 or ri >= GameData.BIOMES.size():
+				continue
+			if int(rm.get("cycle", cycle)) != cycle:
+				continue   # 旧周目的地图不保留
+			var rnodes = _parse_saved_nodes(rm.get("nodes", []), ri)
+			if rnodes.is_empty():
+				continue
+			region_maps[ri] = {
+				"map": _map_from_nodes(rnodes, ri, cycle),
+				"hero_pos": int(rm.get("hero_pos", -1)),
+			}
+	# 当前区域以 map_nodes 为准（与 hero_pos 同步）
+	region_maps[region] = { "map": current_map, "hero_pos": hero_pos }
+
+	# 精铸资源（v6；旧档默认值）
+	refine_dust = maxi(0, int(parsed.get("refine_dust", 0)))
+	best_eff = maxi(int(parsed.get("best_eff", 0)), region + cycle * 5)
 
 	_recalc_stats()
 	hp = clampi(int(parsed.get("hp", max_hp)), 1, max_hp)
@@ -1259,6 +1386,7 @@ func _restore_item(it: Dictionary) -> Dictionary:
 	item["value"] = int(item.get("value", 0))
 	item["invested"] = int(item.get("invested", 0))
 	item["grade"] = int(item.get("grade", 1))
+	item["tier_eff"] = maxi(0, int(item.get("tier_eff", 0)))
 	if item.has("price"):
 		item["price"] = int(item["price"])
 	var st = item.get("stats", {})
@@ -1306,6 +1434,66 @@ func _coerce_int_dict(d) -> Dictionary:
 		for k in d:
 			out[k] = int(d[k])
 	return out
+
+## 解析存档中的地图节点数组（含怪物构成；旧档缺失则现场补掷）
+func _parse_saved_nodes(arr, r: int) -> Array:
+	var nodes = []
+	if not (arr is Array):
+		return nodes
+	for n in arr:
+		if not (n is Dictionary):
+			continue
+		var node = {
+			"id": int(n.get("id", 0)),
+			"row": int(n.get("row", 0)),
+			"col": int(n.get("col", 0)),
+			"type": int(n.get("type", 0)),
+			"visited": bool(n.get("visited", false)),
+			"next": [],
+			"foes": [],
+		}
+		for nx in n.get("next", []):
+			node.next.append(int(nx))
+		for foe in n.get("foes", []):
+			if foe is Dictionary:
+				var fa = []
+				for af in foe.get("affixes", []):
+					fa.append(str(af))
+				node.foes.append({
+					"key": str(foe.get("key", "slime")),
+					"elite": bool(foe.get("elite", false)),
+					"boss": bool(foe.get("boss", false)),
+					"affixes": fa,
+					"element": str(foe.get("element", "")),
+				})
+		# 旧版存档没有怪物构成 → 现场补掷
+		if node.foes.is_empty():
+			match node.type:
+				GameData.NodeType.BATTLE:
+					node.foes = CombatManager.roll_foes(r, cycle, false, false)
+				GameData.NodeType.ELITE:
+					node.foes = CombatManager.roll_foes(r, cycle, true, false)
+				GameData.NodeType.BOSS:
+					node.foes = CombatManager.roll_foes(r, cycle, false, true)
+		nodes.append(node)
+	return nodes
+
+## 由节点数组重建完整地图结构（行 + 连线兜底）
+func _map_from_nodes(nodes: Array, r: int, cyc: int) -> Dictionary:
+	var max_row = 0
+	for n in nodes:
+		max_row = maxi(max_row, n.row)
+	var rows = []
+	for ri in range(max_row + 1):
+		var row = []
+		for n in nodes:
+			if n.row == ri:
+				row.append(n)
+		row.sort_custom(func(a, b): return a.col < b.col)
+		rows.append(row)
+	# 旧版存档地图没有节点连线 → 补织路线，避免小人无路可走卡死
+	MapGenerator.ensure_links(rows)
+	return { "rows": rows, "nodes": nodes, "region": r, "cycle": cyc }
 
 # ============================================================
 # 地图外使用药水

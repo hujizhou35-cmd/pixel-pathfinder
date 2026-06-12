@@ -36,9 +36,9 @@ func _ready() -> void:
 	_pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_pic)
 
-	# 底部字幕暗带
+	# 底部字幕暗带（淡化处理：不遮挡配图下半部分，文字靠描边保证可读）
 	_dim_bottom = ColorRect.new()
-	_dim_bottom.color = Color(0, 0, 0, 0.72)
+	_dim_bottom.color = Color(0, 0, 0, 0.34)
 	_dim_bottom.position = Vector2(0, 520)
 	_dim_bottom.size = Vector2(1280, 200)
 	_dim_bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -57,7 +57,9 @@ func _ready() -> void:
 	_text_lbl = RichTextLabel.new()
 	_text_lbl.bbcode_enabled = false
 	_text_lbl.add_theme_font_size_override("normal_font_size", 17)
-	_text_lbl.add_theme_color_override("default_color", Color("#e8ecf4"))
+	_text_lbl.add_theme_color_override("default_color", Color("#f2f5fa"))
+	_text_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_text_lbl.add_theme_constant_override("outline_size", 5)
 	_text_lbl.position = Vector2(90, 570)
 	_text_lbl.size = Vector2(1100, 120)
 	_text_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE

@@ -62,8 +62,8 @@ const SLOT_NAMES = {
 const AFFIXES = {
 	"crit":      { "name": "精准",  "desc": "暴击率 +10%",                                  "kind": "off" },
 	"critdmg":   { "name": "残忍",  "desc": "暴击伤害 +40%",                                "kind": "off" },
-	"multihit":  { "name": "连击",  "desc": "连击数 +1（弓多射一箭；剑/斧追加一次 80% 伤害的攻击）", "kind": "off" },
-	"critcombo": { "name": "贯连",  "desc": "暴击后本场战斗连击数 +1（上限 +4）",           "kind": "off" },
+	"multihit":  { "name": "连击",  "desc": "连击数 +1（仅弓生效：多射一箭；连击数上限 5）", "kind": "off" },
+	"critcombo": { "name": "贯连",  "desc": "暴击后本场战斗连击数 +1（仅弓生效，上限 +2）",  "kind": "off" },
 	"swift":     { "name": "迅捷",  "desc": "15% 概率追加连击",                             "kind": "off" },
 	"pierce":    { "name": "穿透",  "desc": "攻击力 +12%",                                  "kind": "off" },
 	"chain":     { "name": "连锁",  "desc": "攻击对其它敌人溅射 30%",                       "kind": "off" },
@@ -101,15 +101,18 @@ const AFFIX_KEYS = [
 const NON_STACK_AFFIXES = ["focus", "swiftbash", "shield2atk", "atk2shield"]
 const AFFIX_MAX_LEVEL = 3
 
+# 连击体系词条：只能出现在弓或配饰上，且效果仅在使用弓时生效
+const COMBO_AFFIXES = ["multihit", "critcombo"]
+
 ## 词条说明（带强化等级）：连击等数值词条显示按等级换算后的效果
 static func affix_desc(key: String, lv: int = 1) -> String:
 	var base = str(AFFIXES.get(key, {}).get("desc", ""))
 	if lv <= 1:
 		return base
 	if key == "multihit":
-		return "连击数 +%d（弓多射 %d 箭；剑/斧追加 %d 次 80%% 伤害的攻击）" % [lv, lv, lv]
+		return "连击数 +%d（仅弓生效：多射 %d 箭；连击数上限 5）" % [lv, lv]
 	if key == "critcombo":
-		return "暴击后本场战斗连击数 +%d（上限 +4）" % lv
+		return "暴击后本场战斗连击数 +%d（仅弓生效，上限 +2）" % lv
 	if key == "bashcd":
 		return "盾击冷却 -%d" % lv
 	return "%s（已强化 Lv.%d，数值 ×%d）" % [base, lv, lv]
@@ -142,7 +145,7 @@ const PERKS = {
 	"windrunner": { "name": "疾风步",   "desc": "连击概率 +12%",                    "fx": { "extra_hit": 12 } },
 	"elementalist":{ "name": "元素亲和","desc": "元素触发率 +12%",                  "fx": { "elem_proc": 12 } },
 	"guardsoul":  { "name": "守护之魂", "desc": "护盾获取 +15%",                    "fx": { "shield_gain_pct": 15 } },
-	"archmaster": { "name": "连击之道", "desc": "暴击后本场战斗连击数 +1（上限 +4）", "fx": { "crit_combo": 1 } },
+	"archmaster": { "name": "连击之道", "desc": "暴击后本场战斗连击数 +1（仅弓生效，上限 +2）", "fx": { "crit_combo": 1 } },
 	"firstblood": { "name": "先发制人", "desc": "每场战斗第一回合伤害 +25%",        "fx": { "first_turn_pct": 25 } },
 	"treasurer":  { "name": "寻宝直觉", "desc": "装备掉落率 +15%，战斗金币 +15%",   "fx": { "loot_pct": 15, "gold_pct": 15 } },
 	"bashmaster": { "name": "盾击大师", "desc": "盾击冷却 -1 且盾击不再后手",       "fx": { "bash_cd_reduce": 1, "bash_fast": 1 } },
@@ -388,12 +391,19 @@ const COMBAT = {
 	"extra_hit_dmg_mult": 0.8,
 	"enemy_count_normal": { "1": 0.40, "2": 0.45, "3": 0.15 },
 	"sell_refund_pct": 0.50,
-	# 武器职业差异：斧高伤但攻击有冷却 / 剑无冷却且盾击先手 / 弓低伤多段
-	"axe_dmg_mult": 1.55,
+	# 武器职业差异：斧高伤破甲有冷却 / 剑无冷却且盾击先手、有盾增伤 / 弓低伤多段
+	"axe_dmg_mult": 1.7,
 	"axe_cooldown": 1,
+	"axe_sunder_pct": 0.15,    # 斧破甲：每层降低目标防御 15%
+	"axe_sunder_stacks": 2,    # 破甲最多叠 2 层
+	"axe_sunder_turns": 2,     # 破甲持续 2 回合
+	"sword_bash_shield_mult": 1.5,   # 剑：盾击护盾量 ×1.5
+	"sword_shield_atk_pct": 0.20,    # 剑：护盾在身时普攻伤害 +20%
 	"bow_hits": 2,
-	"bow_hit_mult": 0.62,
-	"bow_combo_cap": 4,        # 贯连词条/连击之道天赋：暴击叠加的连击数上限
+	"bow_hit_mult": 0.4,
+	"bow_combo_cap": 2,        # 贯连词条/连击之道天赋：暴击叠加的连击数上限（仅弓）
+	"multihit_cap": 5,         # 连击数（连击词条+贯连累积）总上限
+	"max_attacks_per_action": 10,    # 单次行动总攻击数上限（含迅捷追击）
 	# 元素克制
 	"elem_counter_mult": 1.30,
 	"elem_resist_mult": 0.80,
@@ -404,9 +414,8 @@ const COMBAT = {
 	# 岩盾触发护盾 = 4 + 防御 × 0.3
 	"earth_shield_base": 4.0,
 	"earth_shield_def_mult": 0.3,
-	# 无限周目：每个强化周目的成长系数（攻击与护盾强化）
-	"cycle_hp_mult": 0.55,
-	"cycle_atk_mult": 0.60,
+	# 无限周目：怪物数值按"有效区域 = 区域 + 周目×5"沿区域曲线成长；
+	# 金币与护盾另有周目系数
 	"cycle_gold_mult": 0.35,
 	"cycle_enemy_shield_mult": 0.35,   # 周目越高，怪物护盾越厚
 	# 熔炼与锻打
@@ -415,7 +424,20 @@ const COMBAT = {
 	"forge_cost_base": 60,
 	"forge_cost_region": 30,
 	"essence_cap": 6,
+	# 精铸与分解（区域效能制度）
+	"refine_cost": 5,          # 精铸一次消耗的精粹
 }
+
+# ---- 分解装备获得的精粹（按稀有度）----
+const DUST_GAIN = {
+	Rarity.COMMON: 1,
+	Rarity.RARE: 3,
+	Rarity.EPIC: 8,
+	Rarity.LEGENDARY: 20,
+}
+
+static func dust_gain(rarity: int) -> int:
+	return int(DUST_GAIN.get(rarity, 1))
 
 # ---- 掉落概率（按怪物级别区分）----
 # 普通怪爆率低、精英/首领必掉且稀有度下限更高
@@ -426,12 +448,12 @@ const DROP_RULES = {
 }
 
 # 稀有度抽取权重（普通怪 / 精英 / 首领）
-# 传奇收紧：精英 90% 稀有 / 10% 史诗（无传奇）；首领 90% 史诗 / 10% 传奇；
-# 商店传奇大幅下调；普通怪与宝箱也同步小幅收紧
+# 精英 稀有:史诗 = 7:3（无传奇）；首领 史诗:传奇 = 7:3；
+# 商店传奇大幅下调；普通怪与宝箱小幅收紧
 const RARITY_WEIGHTS = {
 	"normal": [0.58, 0.30, 0.105, 0.015],
-	"elite":  [0.00, 0.90, 0.10, 0.00],
-	"boss":   [0.00, 0.00, 0.90, 0.10],
+	"elite":  [0.00, 0.70, 0.30, 0.00],
+	"boss":   [0.00, 0.00, 0.70, 0.30],
 	"shop":   [0.32, 0.44, 0.225, 0.015],
 	"chest":  [0.42, 0.37, 0.18, 0.03],
 }
@@ -626,8 +648,19 @@ const EVENT_POOL = [
 # 剧情 CG（assets/cg/N.png + 字幕浮现 + 下一步）
 # 1-8：区域 1-4 进入前/首领战后成对；9：区域 5 进入前；
 # 10：区域 5 首领战前；11-13：击败最终首领后（衔接下一周目轮回）
+# 14-18：开场序章（开始征程后、区域进入 CG 之前，每存档一次）
 # ============================================================
 const CG_DATA = {
+	14: { "title": "序章 · 五道封印",
+		"text": "很久以前，五道封印曾将灾厄锁于世界深处。" },
+	15: { "title": "序章 · 封印松动",
+		"text": "当封印松动，最先失声的，是世界边缘的村镇。" },
+	16: { "title": "序章 · 古印苏醒",
+		"text": "古印苏醒，仿佛在回应命运未竟的召唤。" },
+	17: { "title": "序章 · 踏出第一步",
+		"text": "告别熟悉的土地，告别安宁的岁月，当第一步踏出之时，命运的齿轮便已开始转动。" },
+	18: { "title": "序章 · 远征启程",
+		"text": "前方没有答案，只有等待被揭开的真相。而这场跨越五大地域搜集古印碎片的远征，才刚刚开始。" },
 	1: { "title": "翠林秘境 · 启程",
 		"text": "雾起于古林，树影如同沉默的巨兽伏卧大地。探险者踏入这片被遗忘的秘境时，听见的不是风声，而是腐化根系在黑土下缓缓苏醒的低吟。传言中的庇护之森，已然沦为第一道裂开的封印之地。" },
 	2: { "title": "翠林秘境 · 封印初现",
@@ -655,6 +688,7 @@ const CG_DATA = {
 	13: { "title": "轮回开启",
 		"text": "当守护者倒下，遗迹却并未沉入死寂。相反，远方的五大区域再度泛起光芒，仿佛这场远征从未真正结束。探险者立于废墟之上，回望那条已经走过的道路，终于明白：所谓终点，不过是下一次轮回的起点。更深的试炼，正在黑暗尽头静静等待。\n\n“寻路者，欢迎来到新周目——这里的敌人……已经记住了你的套路。”" },
 }
+const CG_INTRO = [14, 15, 16, 17, 18]      # 开场序章（新远征启程时，区域进入 CG 之前）
 const CG_REGION_ENTER = [1, 3, 5, 7, 9]    # 各区域进入前
 const CG_REGION_CLEAR = [2, 4, 6, 8]       # 区域 1-4 首领战后
 const CG_PRE_FINAL_BOSS = 10               # 区域 5 首领战前
