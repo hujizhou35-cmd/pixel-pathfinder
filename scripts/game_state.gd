@@ -351,20 +351,59 @@ func get_forge_cost() -> int:
 func can_smelt(item: Dictionary) -> bool:
 	return int(item.get("rarity", 0)) >= GameData.Rarity.EPIC and item.get("affixes", []).size() > 0
 
-func smelt_bag_item(index: int, affix_key: String) -> bool:
+## 熔炼：销毁装备，收费 40 金，随机萃取其一条词条为精华（不再由玩家挑选）
+func smelt_bag_item(index: int) -> bool:
 	if index < 0 or index >= bag.size():
 		return false
 	var it = bag[index]
-	if not can_smelt(it) or not it.affixes.has(affix_key):
+	if not can_smelt(it):
 		return false
 	if essences.size() >= GameData.COMBAT["essence_cap"]:
 		SignalBus.show_toast.emit("精华袋已满（%d/%d）" % [essences.size(), GameData.COMBAT["essence_cap"]])
 		return false
+	var cost = int(GameData.COMBAT["smelt_cost"])
+	if gold < cost:
+		SignalBus.show_toast.emit("金币不足（熔炼需要 %d）" % cost)
+		return false
+	gold -= cost
+	var affix_key = str(it.affixes[randi() % it.affixes.size()])
 	essences.append({ "affix": affix_key, "from": str(it.get("name", it.base_name)) })
 	bag.remove_at(index)
 	var ad = GameData.AFFIXES.get(affix_key, {})
+	SignalBus.gold_changed.emit(gold)
 	SignalBus.bag_changed.emit(bag.duplicate())
-	SignalBus.show_toast.emit("熔炼完成：萃取出「%s」词条精华" % ad.get("name", affix_key))
+	SignalBus.show_toast.emit("熔炼完成：随机萃取出「%s」词条精华" % ad.get("name", affix_key))
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+## 锻打消除：花费 40 金移除装备上的一条词条（腾出位置换新词条）
+func purge_affix(target: Dictionary, affix_key: String) -> bool:
+	var it = null
+	if target.get("kind", "") == "equip":
+		it = equipment.get(str(target.get("slot", "")))
+	elif target.get("kind", "") == "bag":
+		var bi = int(target.get("index", -1))
+		if bi >= 0 and bi < bag.size():
+			it = bag[bi]
+	if it == null or not it.affixes.has(affix_key):
+		return false
+	var cost = int(GameData.COMBAT["purge_cost"])
+	if gold < cost:
+		SignalBus.show_toast.emit("金币不足（消除需要 %d）" % cost)
+		return false
+	gold -= cost
+	it.affixes.erase(affix_key)
+	if it.get("affix_lv") is Dictionary:
+		it.affix_lv.erase(affix_key)
+	var ad = GameData.AFFIXES.get(affix_key, {})
+	_recalc_stats()
+	hp = mini(hp, max_hp)
+	SignalBus.gold_changed.emit(gold)
+	SignalBus.hp_changed.emit(hp, max_hp)
+	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.equipment_changed.emit(str(it.get("slot", "weapon")), it)
+	SignalBus.show_toast.emit("已消除词条「%s」（%s）" % [ad.get("name", affix_key), it.get("name", "装备")])
 	Sfx.play("upgrade")
 	save_game()
 	return true
@@ -376,7 +415,8 @@ static func affix_level_of(item: Dictionary, key: String) -> int:
 	var lvs = item.get("affix_lv", {})
 	return maxi(1, int(lvs.get(key, 1))) if lvs is Dictionary else 1
 
-## 该词条能否锻打到目标装备上：新词条需有空位；同词条可强化（开关型除外，上限 Lv.3）
+## 该词条能否锻打到目标装备上：新词条需有空位（上限随稀有度：稀有2/史诗3/传说4）；
+## 同词条可强化（开关型除外，上限 Lv.3）
 ## 返回 {"ok": bool, "why": String, "to_lv": int}
 func can_forge_to(item: Dictionary, affix_key: String) -> Dictionary:
 	if item.affixes.has(affix_key):
@@ -386,8 +426,9 @@ func can_forge_to(item: Dictionary, affix_key: String) -> Dictionary:
 		if lv >= GameData.AFFIX_MAX_LEVEL:
 			return { "ok": false, "why": "该词条已达最高 Lv.%d" % GameData.AFFIX_MAX_LEVEL, "to_lv": 0 }
 		return { "ok": true, "why": "", "to_lv": lv + 1 }
-	if item.affixes.size() >= GameData.COMBAT["max_affix_total"]:
-		return { "ok": false, "why": "词条已达上限（%d 条）" % GameData.COMBAT["max_affix_total"], "to_lv": 0 }
+	var cap = GameData.affix_cap(int(item.get("rarity", 0)))
+	if item.affixes.size() >= cap:
+		return { "ok": false, "why": "%s装备词条上限 %d 条（可先消除旧词条）" % [GameData.get_rarity_name(int(item.get("rarity", 0))), cap], "to_lv": 0 }
 	return { "ok": true, "why": "", "to_lv": 1 }
 
 ## target: {"kind":"equip","slot":...} 或 {"kind":"bag","index":...}
@@ -576,11 +617,12 @@ func open_shop() -> void:
 	var disc = 1.0 - stats.discount / 100.0
 	shop_stock.clear()
 	# 9 件随机商品：六个槽位各 1，再补 3 件随机（商店可重复进入，每次进货）
+	# 商店定价 ×2.56（在原 ×1.6 基础上涨价 60%）
 	var slots = GameData.EQUIP_SLOTS.duplicate()
 	slots.append_array(["", "", ""])
 	for i in range(slots.size()):
 		var it = EquipmentFactory.generate_item(region, slots[i], -1, "shop")
-		it["price"] = roundi(it.value * 1.6 * disc / 5.0) * 5
+		it["price"] = roundi(it.value * 2.56 * disc / 5.0) * 5
 		shop_stock.append(it)
 	potion_price = roundi(30 * (1 + region * 0.2) * disc / 5.0) * 5
 	SignalBus.show_modal.emit("shop", { "stock": shop_stock, "potion_price": potion_price })

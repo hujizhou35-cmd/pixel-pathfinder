@@ -7,14 +7,18 @@ extends Node
 
 # ---- 稀有度定义 ----
 # 属性强度/词条数量/价值 严格按 传奇 > 史诗 > 稀有 > 普通 递增
+# max_affixes: 出厂自带词条数；affix_cap: 锻打后词条上限（稀有2/史诗3/传说4）
 enum Rarity { COMMON, RARE, EPIC, LEGENDARY }
 
 const RARITY_DATA = {
-	Rarity.COMMON:    { "name": "普通", "color": Color("#b8bcc8"), "mult": 1.00, "max_affixes": 0, "base_value": 18 },
-	Rarity.RARE:      { "name": "稀有", "color": Color("#5aa7ff"), "mult": 1.30, "max_affixes": 1, "base_value": 45 },
-	Rarity.EPIC:      { "name": "史诗", "color": Color("#bd6fff"), "mult": 1.65, "max_affixes": 2, "base_value": 95 },
-	Rarity.LEGENDARY: { "name": "传说", "color": Color("#f4c454"), "mult": 2.05, "max_affixes": 3, "base_value": 190 },
+	Rarity.COMMON:    { "name": "普通", "color": Color("#b8bcc8"), "mult": 1.00, "max_affixes": 0, "affix_cap": 1, "base_value": 18 },
+	Rarity.RARE:      { "name": "稀有", "color": Color("#5aa7ff"), "mult": 1.30, "max_affixes": 1, "affix_cap": 2, "base_value": 45 },
+	Rarity.EPIC:      { "name": "史诗", "color": Color("#bd6fff"), "mult": 1.65, "max_affixes": 2, "affix_cap": 3, "base_value": 95 },
+	Rarity.LEGENDARY: { "name": "传说", "color": Color("#f4c454"), "mult": 2.05, "max_affixes": 3, "affix_cap": 4, "base_value": 190 },
 }
+
+static func affix_cap(rarity: int) -> int:
+	return int(RARITY_DATA.get(rarity, RARITY_DATA[Rarity.COMMON]).get("affix_cap", 1))
 
 # ---- 武器模板 ----
 const WEAPON_TEMPLATES = {
@@ -406,9 +410,10 @@ const COMBAT = {
 	"cycle_gold_mult": 0.35,
 	"cycle_enemy_shield_mult": 0.35,   # 周目越高，怪物护盾越厚
 	# 熔炼与锻打
+	"smelt_cost": 40,          # 熔炼（随机萃取一条词条）费用
+	"purge_cost": 40,          # 锻打消除一条已有词条的费用
 	"forge_cost_base": 60,
 	"forge_cost_region": 30,
-	"max_affix_total": 4,      # 锻打后单件装备词条上限
 	"essence_cap": 6,
 }
 
@@ -421,12 +426,14 @@ const DROP_RULES = {
 }
 
 # 稀有度抽取权重（普通怪 / 精英 / 首领）
+# 传奇收紧：精英 90% 稀有 / 10% 史诗（无传奇）；首领 90% 史诗 / 10% 传奇；
+# 商店传奇大幅下调；普通怪与宝箱也同步小幅收紧
 const RARITY_WEIGHTS = {
-	"normal": [0.55, 0.30, 0.12, 0.03],
-	"elite":  [0.00, 0.55, 0.33, 0.12],
-	"boss":   [0.00, 0.00, 0.62, 0.38],
-	"shop":   [0.30, 0.40, 0.24, 0.06],
-	"chest":  [0.40, 0.36, 0.18, 0.06],
+	"normal": [0.58, 0.30, 0.105, 0.015],
+	"elite":  [0.00, 0.90, 0.10, 0.00],
+	"boss":   [0.00, 0.00, 0.90, 0.10],
+	"shop":   [0.32, 0.44, 0.225, 0.015],
+	"chest":  [0.42, 0.37, 0.18, 0.03],
 }
 
 # ============================================================

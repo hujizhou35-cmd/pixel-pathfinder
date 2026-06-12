@@ -12,6 +12,7 @@ var _streams: Dictionary = {}
 var _pool: Array = []
 var _pool_idx: int = 0
 var _ambient: AudioStreamPlayer = null
+var _cg_music: AudioStreamPlayer = null
 
 func _ready() -> void:
 	_build_all()
@@ -26,6 +27,12 @@ func _ready() -> void:
 	_ambient.volume_db = -26.0
 	add_child(_ambient)
 	_ambient.play()
+
+	# CG 专属配乐（叙事感和弦琶音循环，与游戏内环境音区分）
+	_cg_music = AudioStreamPlayer.new()
+	_cg_music.stream = _make_cg_music_loop()
+	_cg_music.volume_db = -13.0
+	add_child(_cg_music)
 
 func play(key: String) -> void:
 	if muted:
@@ -43,9 +50,27 @@ func toggle_mute() -> bool:
 	if _ambient:
 		if muted:
 			_ambient.stop()
-		else:
+		elif _cg_music == null or not _cg_music.playing:
 			_ambient.play()
+	if muted and _cg_music:
+		_cg_music.stop()
 	return muted
+
+## CG 播放期间：停掉环境风声，播放叙事配乐
+func start_cg_music() -> void:
+	if _ambient:
+		_ambient.stop()
+	if muted:
+		return
+	if _cg_music and not _cg_music.playing:
+		_cg_music.play()
+
+## CG 结束：停配乐，恢复环境风声
+func stop_cg_music() -> void:
+	if _cg_music:
+		_cg_music.stop()
+	if _ambient and not muted:
+		_ambient.play()
 
 # ------------------------------------------------------------
 # 合成器
@@ -122,6 +147,56 @@ func _wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	wav.mix_rate = RATE
 	wav.stereo = false
 	wav.data = bytes
+	return wav
+
+## CG 配乐：Am–F–C–G 和弦琶音 + 低音垫，8 秒无缝循环（缓慢、史诗叙事感）
+func _make_cg_music_loop() -> AudioStreamWAV:
+	var chords = [
+		[220.00, 261.63, 329.63],   # Am: A3 C4 E4
+		[174.61, 220.00, 261.63],   # F:  F3 A3 C4
+		[196.00, 261.63, 329.63],   # C/G: G3 C4 E4
+		[196.00, 246.94, 293.66],   # G:  G3 B3 D4
+	]
+	var beat := 0.5
+	var total := 8.0
+	var n = int(total * RATE)
+	var samples = PackedFloat32Array()
+	samples.resize(n)
+	for ci in range(chords.size()):
+		var ch = chords[ci]
+		# 琶音：低-中-高-高八度，音尾互相重叠营造延音
+		for bi in range(4):
+			var note_f: float = ch[bi % 3] * (2.0 if bi == 3 else 1.0)
+			var start = int((ci * 2.0 + bi * beat) * RATE)
+			var len = int(beat * 1.7 * RATE)
+			for i in range(len):
+				var idx = start + i
+				if idx >= n:
+					break
+				var t = float(i) / len
+				var env = sin(PI * t) * (1.0 - t * 0.35)
+				samples[idx] += sin(TAU * note_f * i / RATE) * 0.15 * env
+		# 低音垫：和弦根音低八度铺底
+		var bass_f: float = ch[0] / 2.0
+		var bstart = int(ci * 2.0 * RATE)
+		var blen = int(2.0 * RATE)
+		for i in range(blen):
+			var idx = bstart + i
+			if idx >= n:
+				break
+			var t = float(i) / blen
+			var benv = minf(1.0, t * 10.0) * minf(1.0, (1.0 - t) * 5.0)
+			samples[idx] += sin(TAU * bass_f * i / RATE) * 0.10 * benv
+	# 首尾淡入淡出避免循环爆音
+	var fade = int(0.05 * RATE)
+	for i in range(fade):
+		var k = float(i) / fade
+		samples[i] *= k
+		samples[n - 1 - i] *= k
+	var wav = _wav(samples)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
 	return wav
 
 func _make_wind_loop() -> AudioStreamWAV:

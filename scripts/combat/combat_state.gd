@@ -476,11 +476,11 @@ func _enemy_step() -> void:
 	_queue_next(_enemy_step, 0.55)
 
 func _process_enemy_action(e, idx: int) -> void:
-	# 灼烧结算
+	# 灼烧结算（无视护盾与防御）
 	if int(e.get("burn", 0)) > 0:
 		e.burn -= 1
 		var bd = int(e.get("burn_dmg", 1))
-		DamageCalculator.apply_damage_to_enemy(e, bd, false, { "pierce_shield": true })
+		DamageCalculator.apply_damage_to_enemy(e, bd, false, { "pierce_shield": true, "ignore_def": true })
 		GameState.run_stats.dmg_dealt += bd
 		SignalBus.player_attacked.emit(idx, bd, false)
 		SignalBus.combat_log_message.emit("%s 被灼烧，受到 %d 点伤害" % [e.name, bd], "crit")
@@ -602,6 +602,7 @@ func _boss_trait_action(e, idx: int) -> bool:
 			"maxhp": maxi(1, roundi(e.maxhp * 0.15)),
 			"atk": maxi(1, roundi(e.atk * 0.4)),
 			"base_atk": maxi(1, roundi(e.atk * 0.4)),
+			"def": maxi(0, roundi(int(e.get("def", 0)) * 0.5)),
 			"shield": 0, "is_boss": false, "is_elite": false,
 			"traits": null, "scale": 4.0,
 			"affixes": [], "element": str(biome.get("element", "")),

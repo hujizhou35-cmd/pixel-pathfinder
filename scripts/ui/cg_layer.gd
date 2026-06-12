@@ -83,6 +83,7 @@ func play(ids: Array, tag: String) -> void:
 	_queue = ids.duplicate()
 	_tag = tag
 	visible = true
+	Sfx.start_cg_music()
 	_show_current()
 
 func _show_current() -> void:
@@ -124,6 +125,7 @@ func _on_next() -> void:
 func _finish() -> void:
 	visible = false
 	_pic.texture = null
+	Sfx.stop_cg_music()
 	var t = _tag
 	_tag = ""
 	SignalBus.cg_finished.emit(t)

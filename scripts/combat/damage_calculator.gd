@@ -39,8 +39,12 @@ static func calc_player_hit(stats: Dictionary, target, mult: float = 1.0) -> Dic
 		"elem_tag": elem_tag,
 	}
 
-## opts: pierce_shield 无视护盾（锐金触发）
+## opts: pierce_shield 无视护盾（雷击触发）；ignore_def 无视防御（灼烧）
 static func apply_damage_to_enemy(enemy: Dictionary, dmg: int, is_crit: bool = false, opts: Dictionary = {}) -> int:
+	# 怪物防御：固定减免每次受到的伤害（最低 1 点；灼烧无视防御）
+	if not opts.get("ignore_def", false):
+		dmg = maxi(1, dmg - int(enemy.get("def", 0)))
+
 	# 坚甲词条：受到伤害 -25%
 	if enemy.get("affixes", []).has("armored"):
 		dmg = maxi(1, roundi(dmg * 0.75))

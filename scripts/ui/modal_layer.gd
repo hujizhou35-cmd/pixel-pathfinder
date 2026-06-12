@@ -19,7 +19,7 @@ var _dirty: bool = false
 var _stack: Array = []   # [{type, data}] 被叠加暂存的底层弹窗
 
 ## 可以叠加到其它弹窗之上的"查看类"窗口
-const OVERLAY_TYPES = ["bag", "equip_detail", "help", "codex", "stats", "smelt", "forge"]
+const OVERLAY_TYPES = ["bag", "equip_detail", "help", "codex", "stats", "smelt", "forge", "purge"]
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -140,6 +140,7 @@ func _rebuild() -> void:
 		"node_preview":  _build_node_preview(content)
 		"smelt":         _build_smelt(content)
 		"forge":         _build_forge(content)
+		"purge":         _build_purge(content)
 		"perk_choice":   _build_perk_choice(content)
 		"perk_replace":  _build_perk_replace(content)
 		"new_run_setup": _build_new_run_setup(content)
@@ -432,23 +433,31 @@ func _build_bag(c: VBoxContainer) -> void:
 			GameState.sell_bag_item(idx)
 			Sfx.play("coin")
 		, 130.0)
-		# 熔炼：史诗+且有词条的装备可萃取词条精华
+		# 熔炼：史诗+且有词条的装备可随机萃取词条精华（收费）
 		if GameState.can_smelt(it):
 			var sm = _btn(r, "熔炼", func():
 				SignalBus.show_modal.emit("smelt", { "index": idx })
 			, 80.0)
-			sm.tooltip_text = "销毁该装备，自选萃取其一条词条为精华（可锻打到其他装备上）"
+			sm.tooltip_text = "花费 %d 金销毁该装备，随机萃取其一条词条为精华（可锻打到其他装备上）" % int(GameData.COMBAT["smelt_cost"])
 	if shown == 0:
 		_text(inner, "(该分类下没有物品)", 14, UITheme.C_TEXT_DIM)
 
-	# 词条精华（熔炼所得，可锻打）
+	# 词条精华（熔炼所得，可锻打；同词条锻打=强化；可付费消除已有词条）
+	var ess_row = HBoxContainer.new()
+	ess_row.add_theme_constant_override("separation", 10)
+	inner.add_child(ess_row)
 	var ess_lbl = Label.new()
-	ess_lbl.text = "— 词条精华 %d/%d（锻打费用 %d 金）—" % [GameState.essences.size(), GameData.COMBAT["essence_cap"], GameState.get_forge_cost()]
+	ess_lbl.text = "— 词条精华 %d/%d（锻打 %d 金）—" % [GameState.essences.size(), GameData.COMBAT["essence_cap"], GameState.get_forge_cost()]
 	ess_lbl.add_theme_color_override("font_color", Color("#e8a8ff"))
 	ess_lbl.add_theme_font_size_override("font_size", 14)
-	inner.add_child(ess_lbl)
+	ess_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ess_row.add_child(ess_lbl)
+	var purge_b = _btn(ess_row, "消除词条", func():
+		SignalBus.show_modal.emit("purge", {})
+	, 110.0)
+	purge_b.tooltip_text = "花费 %d 金移除装备上的一条词条，为新词条腾位置" % int(GameData.COMBAT["purge_cost"])
 	if GameState.essences.is_empty():
-		_text(inner, "(熔炼史诗或传说装备可获得词条精华)", 13, UITheme.C_TEXT_DIM)
+		_text(inner, "(熔炼史诗或传说装备可随机萃取词条精华，费用 %d 金)" % int(GameData.COMBAT["smelt_cost"]), 13, UITheme.C_TEXT_DIM)
 	for i in range(GameState.essences.size()):
 		var es = GameState.essences[i]
 		var ad = GameData.AFFIXES.get(es.affix, {})
@@ -685,7 +694,9 @@ func _build_help(c: VBoxContainer) -> void:
 		"◆ 元素：闪电克森林·森林克大地·大地克寒冰·寒冰克焰火·焰火克闪电，克制 ×1.3。",
 		"◆ 装备六部位：武器/铠甲/头盔/裤子/鞋/配饰；同前缀 2/3 件成套装；+3 被动 +5 独特。",
 		"◆ 新存档：给角色起名并分配 10 点天赋；通关区域 2 / 区域 5 后各三选一天赋词条（周目同样），上限 5 条、超出可替换。",
-		"◆ 熔炼：史诗+装备可萃取词条精华，锻打到其他装备上（背包内操作）。",
+		"◆ 熔炼（40金）随机萃取词条精华 → 锻打到其他装备；同词条=强化；也可花 40 金消除词条腾位。",
+		"◆ 词条上限随稀有度：稀有 2 条 / 史诗 3 条 / 传说 4 条。",
+		"◆ 掉落：精英 90% 稀有 10% 史诗；首领 90% 史诗 10% 传奇——传奇极其珍贵。",
 		"◆ 背包 32 格：可按 武器/衣物/配饰 分类查看，一键整理。",
 		"◆ 阵亡损失一半金币，装备保留；进度随时自动保存（3 个存档位）。",
 		"◆ 快捷键：B 背包 · C 图鉴 · V 属性 · Esc 关闭窗口。",
@@ -1128,6 +1139,7 @@ func _codex_mechanics(v: VBoxContainer) -> void:
 	_codex_line(act_card, "防御", "获得护盾（%d + 防御×%.1f），冷却 %d 回合；带「蓄势」词条时每次防御 +1 层（最多 3 层），下次攻击每层 +30%% 伤害，攻击后清零。" % [C.base_def_shield, C.def_shield_def_mult, C.defend_cooldown])
 	_codex_line(act_card, "药水", "恢复 40%% 最大生命，战斗内冷却 %d 回合；「药理」词条恢复 +15%%/级 且冷却 -1。" % C.potion_cooldown)
 	_codex_line(act_card, "伤害公式", "你受到的伤害 = 敌攻 × 元素系数 − 防御×%.1f，再依次结算：闪避 → 完全格挡 → 减伤%% → 减半格挡 → 护盾吸收 → 扣血。" % C.def_dmg_reduction)
+	_codex_line(act_card, "怪物防御", "怪物拥有防御属性：你的每次攻击/每箭都固定扣减其防御值（最低 1 伤害）。多段低伤打法受防御影响更大；灼烧无视防御与护盾。", Color("#ff9b8a"))
 
 	var shield_card = _codex_card(v, "三、护盾体系（已削弱）", Color("#5ab4e8"))
 	_codex_line(shield_card, "上限", "你的护盾总量永远不会超过最大生命 × %d%%，所有来源共用此上限（超出部分浪费）。" % roundi(C.shield_cap_pct * 100), Color("#ff9b8a"))
@@ -1144,9 +1156,10 @@ func _codex_mechanics(v: VBoxContainer) -> void:
 	_codex_line(combo_card, "触发关系", "每一箭/每次追击都独立判定：暴击、元素触发（%d%%+触发率加成）、震慑、燃焰、吸血——攻击段数越多，特效期望越高。" % roundi(C.elem_proc_chance))
 
 	var forge_card = _codex_card(v, "五、熔炼与锻打（词条强化）", Color("#e8a8ff"))
-	_codex_line(forge_card, "熔炼", "史诗+装备可销毁并萃取其一条词条为「精华」（精华袋上限 %d）。" % C.essence_cap)
-	_codex_line(forge_card, "锻打新词条", "把精华打到没有该词条的装备上 → 新增词条（单件上限 %d 条）。" % C.max_affix_total)
+	_codex_line(forge_card, "熔炼", "史诗+装备可花费 %d 金销毁，【随机】萃取其一条词条为「精华」（不可挑选；精华袋上限 %d）。" % [int(C.smelt_cost), C.essence_cap])
+	_codex_line(forge_card, "锻打新词条", "把精华打到没有该词条的装备上 → 新增词条。词条上限随稀有度：稀有 2 条 / 史诗 3 条 / 传说 4 条。")
 	_codex_line(forge_card, "同词条强化", "把精华打到已有同词条的装备上 → 词条升级（最高 Lv.%d）：数值词条按等级倍增（如连击 Lv.2 = 连击数 +2，精准 Lv.2 = 暴击率 +20%%）。" % GameData.AFFIX_MAX_LEVEL, UITheme.C_GREEN)
+	_codex_line(forge_card, "消除词条", "可花费 %d 金移除装备上的一条词条（背包 → 消除词条），为锻打新词条腾出位置。" % int(C.purge_cost), UITheme.C_GREEN)
 	_codex_line(forge_card, "不可强化", "开关型词条（蓄势/疾盾/盾转攻/攻转盾）只有开或关，无法升级。")
 
 	var stack_card = _codex_card(v, "六、叠加规则速查", UITheme.C_GOLD)
@@ -1198,9 +1211,10 @@ func _codex_monsters(v: VBoxContainer) -> void:
 			var t = GameData.get_enemy_type(key)
 			var lore = LoreData.get_monster_lore(key)
 			var base_hp = roundi((20.0 + ri * 16.0) * t.hp_mult)
-			var base_atk = roundi((5.0 + ri * 3.4) * t.atk_mult)
+			var base_atk = roundi((10.0 + ri * 7.0) * t.atk_mult)
+			var base_def = roundi(2.0 + ri * 2.2)
 			var card = _codex_card(v, t.name, UITheme.C_TEXT)
-			_codex_line(card, "数值", "基准生命 %d · 基准攻击 %d（精英 ×2.2 生命/×1.3 攻击；每周目再 +55%%/+45%%）" % [base_hp, base_atk], Color("#9fd6ff"))
+			_codex_line(card, "数值", "基准生命 %d · 基准攻击 %d · 基准防御 %d（精英 ×2.2 生命/×1.3 攻击/×1.3 防御；每周目生命 +55%%、攻击 +60%%、防御 +50%%）" % [base_hp, base_atk, base_def], Color("#9fd6ff"))
 			var st = GameData.get_enemy_style(key)
 			if str(st.get("name", "")) != "":
 				_codex_line(card, "风格", "%s — %s" % [st.name, st.desc], Color("#8aeb9a"))
@@ -1219,7 +1233,7 @@ func _codex_bosses(v: VBoxContainer) -> void:
 		var boss = biome.boss
 		var lore = LoreData.get_boss_lore(ri)
 		var hp_est = roundi((20.0 + ri * 16.0) * 5.5)
-		var atk_est = roundi((5.0 + ri * 3.4) * 1.5)
+		var atk_est = roundi((10.0 + ri * 7.0) * 1.5)
 		var card = _codex_card(v, "区域 %d 首领 · %s" % [ri + 1, boss.name], UITheme.C_GOLD)
 		var tnames = []
 		for tr in boss.traits:
@@ -1270,7 +1284,7 @@ func _build_node_preview(c: VBoxContainer) -> void:
 				head_color = Color("#bd6fff")
 		var elem = str(foe.get("element", ""))
 		var card = _codex_card(c, "〔%s〕%s" % [GameData.element_name(elem), fname], head_color)
-		_codex_line(card, "数值", "生命 %d · 攻击 %d" % [st.hp, st.atk], Color("#9fd6ff"))
+		_codex_line(card, "数值", "生命 %d · 攻击 %d · 防御 %d" % [st.hp, st.atk, st.get("def", 0)], Color("#9fd6ff"))
 		if not foe.get("boss", false):
 			var style = GameData.get_enemy_style(str(foe.key))
 			if str(style.get("name", "")) != "":
@@ -1289,15 +1303,75 @@ func _build_node_preview(c: VBoxContainer) -> void:
 		var stats = GameState.get_player_stats()
 		var wm = GameData.element_mult(str(stats.get("weapon_element", "")), elem)
 		if wm > 1.0:
-			_codex_line(card, "克制", "你的武器五行克制它（伤害 ×%.1f）" % wm, UITheme.C_GREEN)
+			_codex_line(card, "克制", "你的武器元素克制它（伤害 ×%.1f）" % wm, UITheme.C_GREEN)
 		elif wm < 1.0:
-			_codex_line(card, "克制", "你的武器五行被它克制（伤害 ×%.1f）" % wm, Color("#cf8a6a"))
+			_codex_line(card, "克制", "你的武器元素被它克制（伤害 ×%.1f）" % wm, Color("#cf8a6a"))
 	var r = _btn_row(c)
 	_btn(r, "进 入 战 斗", func():
 		close_all()
 		GameState.enter_node(node)
 	, 180.0)
 	_btn(r, "再 想 想", close, 140.0)
+
+# ------------------------------------------------------------
+# 锻打消除：花费 40 金移除装备上的一条词条（腾位置换新词条）
+# ------------------------------------------------------------
+func _build_purge(c: VBoxContainer) -> void:
+	var cost = int(GameData.COMBAT["purge_cost"])
+	_title(c, "锻 打 消 除 词 条", Color("#cf8a6a"))
+	_text(c, "花费 %d 金币移除一条已有词条（不可恢复），为锻打新词条腾出位置。金币 %d" % [cost, GameState.gold], 14, UITheme.C_TEXT_DIM)
+
+	var scroll = ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(560, 360)
+	c.add_child(scroll)
+	var inner = VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 6)
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(inner)
+
+	var shown = 0
+	for slot in GameData.EQUIP_SLOTS:
+		var it = GameState.equipment.get(slot)
+		if it and it.affixes.size() > 0:
+			shown += 1
+			_purge_item_rows(inner, it, "已装备·%s" % GameData.slot_name(slot), { "kind": "equip", "slot": slot }, cost)
+	for i in range(GameState.bag.size()):
+		var it = GameState.bag[i]
+		if it.affixes.size() > 0:
+			shown += 1
+			_purge_item_rows(inner, it, "背包", { "kind": "bag", "index": i }, cost)
+	if shown == 0:
+		_text(inner, "（没有带词条的装备）", 14, UITheme.C_TEXT_DIM)
+
+	var r = _btn_row(c)
+	_btn(r, "关闭", close, 140.0)
+
+func _purge_item_rows(parent: Control, it: Dictionary, tag: String, target: Dictionary, cost: int) -> void:
+	var head = Label.new()
+	head.text = "[%s] %s" % [tag, it.get("name", it.base_name)]
+	head.add_theme_font_size_override("font_size", 14)
+	head.add_theme_color_override("font_color", UITheme.rarity_color(it.rarity))
+	parent.add_child(head)
+	for a in it.affixes:
+		var ak = str(a)
+		var ad = GameData.AFFIXES.get(ak, {})
+		var lv = GameState.affix_level_of(it, ak)
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		parent.add_child(row)
+		var l = Label.new()
+		l.text = "　◆ %s%s · %s" % [ad.get("name", ak), (" Lv.%d" % lv) if lv > 1 else "", GameData.affix_desc(ak, lv)]
+		l.add_theme_font_size_override("font_size", 13)
+		l.add_theme_color_override("font_color", UITheme.C_TEXT_DIM)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(360, 0)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		var b = _btn(row, "消除(%d金)" % cost, func():
+			if GameState.purge_affix(target, ak):
+				_rebuild()
+		, 110.0)
+		b.disabled = GameState.gold < cost
 
 # ------------------------------------------------------------
 # 天赋词条三选一（通关区域 2 / 区域 5 后，上限 5 条）
@@ -1435,7 +1509,7 @@ func _build_new_run_setup(c: VBoxContainer) -> void:
 	, 120.0)
 
 # ------------------------------------------------------------
-# 熔炼：选择要萃取的词条
+# 熔炼：收费 40 金，随机萃取一条词条（不可挑选）
 # ------------------------------------------------------------
 func _build_smelt(c: VBoxContainer) -> void:
 	var idx = int(_current_data.get("index", -1))
@@ -1443,19 +1517,21 @@ func _build_smelt(c: VBoxContainer) -> void:
 		close()
 		return
 	var it = GameState.bag[idx]
+	var cost = int(GameData.COMBAT["smelt_cost"])
 	_title(c, "熔 炼 装 备", Color("#e8a8ff"))
 	_item_card(c, it, true)
-	_text(c, "装备将被销毁，从下列词条中选择一条萃取为精华：", 14, Color("#cf8a6a"))
+	_text(c, "装备将被销毁，并从它的词条中【随机】萃取一条为精华（费用 %d 金币）：" % cost, 14, Color("#cf8a6a"))
+	var names = []
 	for a in it.affixes:
-		var ad = GameData.AFFIXES.get(a, {})
-		var ak = a
-		var row = _btn_row(c)
-		_btn(row, "萃取「%s」 — %s" % [ad.get("name", a), ad.get("desc", "")], func():
-			if GameState.smelt_bag_item(idx, ak):
-				close()
-		, 420.0)
-	_text(c, "精华袋 %d/%d" % [GameState.essences.size(), GameData.COMBAT["essence_cap"]], 13, UITheme.C_TEXT_DIM)
+		names.append(GameData.AFFIXES.get(a, {}).get("name", a))
+	_text(c, "可能萃取到：%s" % "、".join(names), 14, Color("#e8a8ff"))
+	_text(c, "精华袋 %d/%d   ·   金币 %d" % [GameState.essences.size(), GameData.COMBAT["essence_cap"], GameState.gold], 13, UITheme.C_TEXT_DIM)
 	var r = _btn_row(c)
+	var b = _btn(r, "熔炼（%d 金币）" % cost, func():
+		if GameState.smelt_bag_item(idx):
+			close()
+	, 200.0)
+	b.disabled = GameState.gold < cost
 	_btn(r, "取消", close, 140.0)
 
 # ------------------------------------------------------------
@@ -1471,7 +1547,7 @@ func _build_forge(c: VBoxContainer) -> void:
 	_title(c, "锻 打 词 条", Color("#e8a8ff"))
 	_text(c, "精华：「%s」 — %s" % [ad.get("name", es.affix), ad.get("desc", "")], 15, Color("#e8a8ff"))
 	var cost = GameState.get_forge_cost()
-	_text(c, "选择目标装备（花费 %d 金币 · 单件词条上限 %d 条 · 不可重复）：" % [cost, GameData.COMBAT["max_affix_total"]], 14, UITheme.C_TEXT_DIM)
+	_text(c, "选择目标装备（花费 %d 金币 · 词条上限随稀有度：稀有2/史诗3/传说4 · 同词条=强化）：" % cost, 14, UITheme.C_TEXT_DIM)
 
 	var scroll = ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(540, 320)
@@ -1503,7 +1579,7 @@ func _forge_target_row(parent: Control, it: Dictionary, tag: String, es: Diction
 	if it.affixes.has(es.affix):
 		var cur_lv = GameState.affix_level_of(it, str(es.affix))
 		note = "（已有该词条 Lv.%d%s）" % [cur_lv, ("，可强化至 Lv.%d" % int(chk.to_lv)) if chk.ok else ""]
-	l.text = "[%s] %s（词条 %d/%d）%s" % [tag, it.get("name", it.base_name), it.affixes.size(), GameData.COMBAT["max_affix_total"], note]
+	l.text = "[%s] %s（词条 %d/%d）%s" % [tag, it.get("name", it.base_name), it.affixes.size(), GameData.affix_cap(int(it.get("rarity", 0))), note]
 	l.add_theme_font_size_override("font_size", 14)
 	l.add_theme_color_override("font_color", rc)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

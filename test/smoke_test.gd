@@ -166,11 +166,21 @@ func _run() -> void:
 	_check(foes_ok, "所有战斗节点都预掷了怪物构成")
 	_check(boss_node != null and battle_node != null and shop_node != null, "地图包含首领/战斗/商店节点")
 
-	# 预览数值 = 实战数值
+	# 预览数值 = 实战数值（含新防御属性）
 	var foe0 = battle_node.foes[0]
 	var prev = CombatManager.enemy_stats_for(foe0, GameState.region, GameState.cycle)
 	var built = CombatManager.build_enemy(foe0, GameState.region, GameState.cycle)
-	_check(prev.hp == built.maxhp and prev.atk == built.atk, "预览数值与实战一致 (HP %d / ATK %d)" % [prev.hp, prev.atk])
+	_check(prev.hp == built.maxhp and prev.atk == built.atk and prev.def == built.def, "预览数值与实战一致 (HP %d / ATK %d / DEF %d)" % [prev.hp, prev.atk, prev.def])
+	# 怪物增强：攻击约为旧版 2 倍，且拥有防御属性
+	var slime_st = CombatManager.enemy_stats_for({ "key": "slime", "elite": false, "boss": false, "affixes": [], "element": "wood" }, 0, 0)
+	_check(slime_st.atk >= roundi((5.0 + 0 * 3.4) * 0.85 * 2.0) - 1, "怪物攻击约 ×2 (区域1史莱姆 %d)" % slime_st.atk)
+	_check(slime_st.def >= 1, "怪物拥有防御属性 (%d)" % slime_st.def)
+	# 怪物防御真实生效：10 伤害打到 def=5 的怪只掉 5 血；灼烧无视防御
+	var dummy_e = { "hp": 100, "maxhp": 100, "shield": 0, "def": 5, "affixes": [], "hit_flash": 0 }
+	DamageCalculator.apply_damage_to_enemy(dummy_e, 10, false)
+	_check(dummy_e.hp == 95, "怪物防御固定减伤 (100→%d)" % dummy_e.hp)
+	DamageCalculator.apply_damage_to_enemy(dummy_e, 10, false, { "ignore_def": true })
+	_check(dummy_e.hp == 85, "灼烧无视怪物防御 (95→%d)" % dummy_e.hp)
 
 	# 关卡预览弹窗
 	SignalBus.show_modal.emit("node_preview", { "node": battle_node })
@@ -257,14 +267,18 @@ func _run() -> void:
 	var sets = EquipmentModifier.get_active_sets(eq_test)
 	_check(sets.size() == 1 and sets[0].prefix == "风暴" and sets[0].count == 2, "武器+头盔同前缀 2 件激活套装")
 
-	# ---- 9. 熔炼与锻打 ----
+	# ---- 9. 熔炼（收费 40 · 随机萃取）与锻打 ----
 	var epic = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.EPIC)
 	GameState.bag.clear()
 	GameState.bag.append(epic)
 	GameState.essences.clear()
-	var target_affix = epic.affixes[0]
-	var ok_smelt = GameState.smelt_bag_item(0, target_affix)
+	var epic_affixes = epic.affixes.duplicate()
+	var gold_smelt = GameState.gold
+	var ok_smelt = GameState.smelt_bag_item(0)
 	_check(ok_smelt and GameState.essences.size() == 1 and GameState.bag.is_empty(), "熔炼史诗装备 → 词条精华")
+	_check(GameState.gold == gold_smelt - GameData.COMBAT["smelt_cost"], "熔炼收费 %d 金" % int(GameData.COMBAT["smelt_cost"]))
+	var target_affix = str(GameState.essences[0].affix)
+	_check(epic_affixes.has(target_affix), "随机萃取的词条来自原装备词条")
 	var wpn = GameState.equipment.weapon
 	wpn["affixes"] = []
 	wpn["affix_lv"] = {}
@@ -293,6 +307,29 @@ func _run() -> void:
 	wpn["affixes"] = ["critcombo"]
 	var s_cc = EquipmentModifier.calculate_total_stats(GameState.equipment)
 	_check(int(s_cc.crit_combo) == 1, "贯连词条：暴击叠连击属性生效")
+	wpn["affixes"] = []
+	wpn["affix_lv"] = {}
+
+	# ---- 9c. 词条上限随稀有度 + 锻打消除 ----
+	var rare_it = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.RARE)
+	rare_it["affixes"] = ["crit", "regen"]
+	rare_it["affix_lv"] = {}
+	_check(not GameState.can_forge_to(rare_it, "burn").ok, "稀有装备词条上限 2 条")
+	_check(GameState.can_forge_to(rare_it, "crit").ok, "上限已满仍可同词条强化")
+	var leg_it = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.LEGENDARY)
+	leg_it["affixes"] = ["crit", "regen", "burn"]
+	leg_it["affix_lv"] = {}
+	_check(GameState.can_forge_to(leg_it, "stun").ok, "传说装备可锻打到 4 条")
+	leg_it["affixes"] = ["crit", "regen", "burn", "stun"]
+	_check(not GameState.can_forge_to(leg_it, "greed").ok, "传说装备词条上限 4 条")
+	# 锻打消除词条（40 金，腾出位置）
+	wpn["affixes"] = ["crit", "regen"]
+	wpn["affix_lv"] = { "crit": 2 }
+	var gold_purge = GameState.gold
+	var ok_purge = GameState.purge_affix({ "kind": "equip", "slot": "weapon" }, "crit")
+	_check(ok_purge and not wpn.affixes.has("crit") and wpn.affixes.has("regen"), "锻打消除词条成功")
+	_check(GameState.gold == gold_purge - GameData.COMBAT["purge_cost"], "消除词条收费 %d 金" % int(GameData.COMBAT["purge_cost"]))
+	_check(not wpn.affix_lv.has("crit"), "消除词条时同步清除强化等级")
 	wpn["affixes"] = []
 	wpn["affix_lv"] = {}
 
@@ -482,10 +519,30 @@ func _run() -> void:
 	modal.close_all()
 	await _frames(3)
 
-	# ---- 15. 商店 9 件 + 可重复进入 ----
+	# ---- 14b. 掉落稀有度收紧：精英 90/10 稀有/史诗，首领 90/10 史诗/传奇 ----
+	var elite_ok = true
+	var boss_ok = true
+	for i in range(20):
+		var r1 = LootSystem.calculate_combat_rewards([{ "gold_reward": 10 }], false, true)
+		if r1.drop == null or r1.drop.rarity < GameData.Rarity.RARE or r1.drop.rarity > GameData.Rarity.EPIC:
+			elite_ok = false
+		var r2 = LootSystem.calculate_combat_rewards([{ "gold_reward": 10 }], true, false)
+		if r2.drop == null or r2.drop.rarity < GameData.Rarity.EPIC:
+			boss_ok = false
+	_check(elite_ok, "精英掉落仅稀有/史诗，不再掉传奇 (20 次抽样)")
+	_check(boss_ok, "首领必掉史诗+（10% 传奇）(20 次抽样)")
+
+	# ---- 15. 商店 9 件 + 可重复进入 + 涨价 60% ----
 	GameState.open_shop()
 	await _frames(3)
 	_check(GameState.shop_stock.size() == 9, "商店 9 件商品 (实际 %d)" % GameState.shop_stock.size())
+	var price_ok = true
+	var disc_now = 1.0 - GameState.get_player_stats().discount / 100.0
+	for it in GameState.shop_stock:
+		var expect = roundi(it.value * 2.56 * disc_now / 5.0) * 5
+		if absi(int(it.price) - expect) > 5:
+			price_ok = false
+	_check(price_ok, "商店价格 ×2.56（在原基础上涨价 60%）")
 	var has_new_slot = false
 	for it in GameState.shop_stock:
 		if str(it.slot) in ["helmet", "pants", "boots"]:

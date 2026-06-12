@@ -69,11 +69,13 @@ static func _roll_foe(region: int, cycle: int, biome: Dictionary, elite: bool, b
 	return { "key": key, "elite": elite, "boss": boss, "affixes": affixes, "element": elem }
 
 ## 确定性数值（供预览与实战共用）
+## 攻击基准为旧版约 2 倍；新增防御属性（固定减免玩家每次伤害）；生命不变
 static func enemy_stats_for(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 	var boss = bool(foe.get("boss", false))
 	var elite = bool(foe.get("elite", false))
 	var hp_mult = 1.0
 	var atk_mult = 1.0
+	var def_mult = 1.0
 	if not boss:
 		var t = GameData.get_enemy_type(str(foe.key))
 		hp_mult = t.hp_mult
@@ -81,9 +83,11 @@ static func enemy_stats_for(foe: Dictionary, region: int, cycle: int) -> Diction
 	if boss:
 		hp_mult *= 5.5
 		atk_mult *= 1.5
+		def_mult *= 1.6
 	elif elite:
 		hp_mult *= 2.2
 		atk_mult *= 1.3
+		def_mult *= 1.3
 	var affixes: Array = foe.get("affixes", [])
 	if affixes.has("tough"):
 		hp_mult *= 1.5
@@ -94,7 +98,8 @@ static func enemy_stats_for(foe: Dictionary, region: int, cycle: int) -> Diction
 	var cyc_atk = 1.0 + cycle * GameData.COMBAT["cycle_atk_mult"]
 	return {
 		"hp": maxi(1, roundi((20.0 + region * 16.0) * hp_mult * cyc_hp)),
-		"atk": maxi(1, roundi((5.0 + region * 3.4) * atk_mult * cyc_atk)),
+		"atk": maxi(1, roundi((10.0 + region * 7.0) * atk_mult * cyc_atk)),
+		"def": maxi(1, roundi((2.0 + region * 2.2) * def_mult * (1.0 + cycle * 0.5))),
 	}
 
 ## 按构成生成战斗实例
@@ -143,6 +148,7 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 		"hp": st.hp,
 		"atk": st.atk,
 		"base_atk": st.atk,
+		"def": st.def,
 		"gold_reward": gold_reward,
 		"shield": shield,
 		"is_boss": boss,
