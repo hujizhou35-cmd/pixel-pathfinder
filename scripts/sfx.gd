@@ -13,6 +13,9 @@ var _pool: Array = []
 var _pool_idx: int = 0
 var _ambient: AudioStreamPlayer = null
 var _cg_music: AudioStreamPlayer = null
+var _cg_music_tense: AudioStreamPlayer = null      # 周目 Boss 遇见：紧张低沉
+var _cg_music_triumph: AudioStreamPlayer = null    # 周目 Boss 战胜：慷慨激昂
+var _cg_active: AudioStreamPlayer = null           # 当前播放中的 CG 配乐
 
 func _ready() -> void:
 	_build_all()
@@ -33,6 +36,15 @@ func _ready() -> void:
 	_cg_music.stream = _make_cg_music_loop()
 	_cg_music.volume_db = -13.0
 	add_child(_cg_music)
+	# 周目大 Boss 终局 CG 配乐：比叙事乐更响（约 -6dB），区分遇见/战胜两种情绪
+	_cg_music_tense = AudioStreamPlayer.new()
+	_cg_music_tense.stream = _make_cg_music_tense()
+	_cg_music_tense.volume_db = -6.0
+	add_child(_cg_music_tense)
+	_cg_music_triumph = AudioStreamPlayer.new()
+	_cg_music_triumph.stream = _make_cg_music_triumph()
+	_cg_music_triumph.volume_db = -5.0
+	add_child(_cg_music_triumph)
 
 func play(key: String) -> void:
 	if muted:
@@ -52,23 +64,34 @@ func toggle_mute() -> bool:
 			_ambient.stop()
 		elif _cg_music == null or not _cg_music.playing:
 			_ambient.play()
-	if muted and _cg_music:
-		_cg_music.stop()
+	if muted:
+		_stop_cg_players()
 	return muted
 
-## CG 播放期间：停掉环境风声，播放叙事配乐
-func start_cg_music() -> void:
+func _stop_cg_players() -> void:
+	if _cg_music: _cg_music.stop()
+	if _cg_music_tense: _cg_music_tense.stop()
+	if _cg_music_triumph: _cg_music_triumph.stop()
+	_cg_active = null
+
+## CG 播放期间：停掉环境风声，按情绪播放配乐
+## mood: "narrative"(默认叙事) / "tense"(周目 Boss 遇见) / "triumph"(周目 Boss 战胜)
+func start_cg_music(mood: String = "narrative") -> void:
 	if _ambient:
 		_ambient.stop()
+	_stop_cg_players()
 	if muted:
 		return
-	if _cg_music and not _cg_music.playing:
-		_cg_music.play()
+	match mood:
+		"tense": _cg_active = _cg_music_tense
+		"triumph": _cg_active = _cg_music_triumph
+		_: _cg_active = _cg_music
+	if _cg_active:
+		_cg_active.play()
 
 ## CG 结束：停配乐，恢复环境风声
 func stop_cg_music() -> void:
-	if _cg_music:
-		_cg_music.stop()
+	_stop_cg_players()
 	if _ambient and not muted:
 		_ambient.play()
 
@@ -188,6 +211,108 @@ func _make_cg_music_loop() -> AudioStreamWAV:
 			var benv = minf(1.0, t * 10.0) * minf(1.0, (1.0 - t) * 5.0)
 			samples[idx] += sin(TAU * bass_f * i / RATE) * 0.10 * benv
 	# 首尾淡入淡出避免循环爆音
+	var fade = int(0.05 * RATE)
+	for i in range(fade):
+		var k = float(i) / fade
+		samples[i] *= k
+		samples[n - 1 - i] *= k
+	var wav = _wav(samples)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
+	return wav
+
+## 周目 Boss 遇见配乐：低沉不安的小调 drone + 缓慢琶音 + 颤音（紧张气氛）
+func _make_cg_music_tense() -> AudioStreamWAV:
+	var chords = [
+		[146.83, 174.61, 220.00],   # Dm
+		[138.59, 174.61, 207.65],   # 张力和弦
+		[146.83, 185.00, 220.00],   # Dm(#)
+		[130.81, 164.81, 196.00],   # 下行
+	]
+	var total := 8.0
+	var n = int(total * RATE)
+	var samples = PackedFloat32Array()
+	samples.resize(n)
+	for ci in range(chords.size()):
+		var ch = chords[ci]
+		var cstart = int(ci * 2.0 * RATE)
+		# 低音持续 drone（缓慢颤音）
+		var drone_f: float = ch[0] / 2.0
+		var dlen = int(2.0 * RATE)
+		for i in range(dlen):
+			var idx = cstart + i
+			if idx >= n:
+				break
+			var t = float(i) / dlen
+			var env = minf(1.0, t * 6.0) * minf(1.0, (1.0 - t) * 4.0)
+			var trem = 0.85 + 0.15 * sin(TAU * 5.0 * i / RATE)
+			samples[idx] += sin(TAU * drone_f * i / RATE) * 0.17 * env * trem
+		# 缓慢上行琶音（拖长尾音）
+		for bi in range(3):
+			var note_f: float = ch[bi]
+			var start = int((ci * 2.0 + bi * 0.6) * RATE)
+			var len = int(0.9 * RATE)
+			for i in range(len):
+				var idx = start + i
+				if idx >= n:
+					break
+				var t = float(i) / len
+				var env = sin(PI * t) * (1.0 - t * 0.3)
+				samples[idx] += sin(TAU * note_f * i / RATE) * 0.10 * env
+	var fade = int(0.05 * RATE)
+	for i in range(fade):
+		var k = float(i) / fade
+		samples[i] *= k
+		samples[n - 1 - i] *= k
+	var wav = _wav(samples)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
+	return wav
+
+## 周目 Boss 战胜配乐：明亮大调号角进行 C–G–Am–F + 推进低音（慷慨激昂）
+func _make_cg_music_triumph() -> AudioStreamWAV:
+	var chords = [
+		[261.63, 329.63, 392.00],   # C
+		[246.94, 293.66, 392.00],   # G
+		[220.00, 261.63, 329.63],   # Am
+		[174.61, 261.63, 349.23],   # F
+	]
+	var beat := 0.5
+	var total := 8.0
+	var n = int(total * RATE)
+	var samples = PackedFloat32Array()
+	samples.resize(n)
+	for ci in range(chords.size()):
+		var ch = chords[ci]
+		# 号角和弦：叠加泛音 → 铜管般明亮
+		for bi in range(4):
+			var note_f: float = ch[bi % 3] * (2.0 if bi == 3 else 1.0)
+			var start = int((ci * 2.0 + bi * beat) * RATE)
+			var len = int(beat * 1.6 * RATE)
+			for i in range(len):
+				var idx = start + i
+				if idx >= n:
+					break
+				var t = float(i) / len
+				var env = minf(1.0, t * 12.0) * (1.0 - t * 0.5)
+				var s = sin(TAU * note_f * i / RATE)
+				s += 0.5 * sin(TAU * note_f * 2.0 * i / RATE)
+				s += 0.22 * sin(TAU * note_f * 3.0 * i / RATE)
+				samples[idx] += s * 0.06 * env
+		# 推进低音（每拍点奏）
+		var bass_f: float = ch[0] / 2.0
+		for bb in range(4):
+			var bstart = int((ci * 2.0 + bb * beat) * RATE)
+			var blen = int(0.4 * RATE)
+			for i in range(blen):
+				var idx = bstart + i
+				if idx >= n:
+					break
+				var t = float(i) / blen
+				var benv = minf(1.0, t * 12.0) * minf(1.0, (1.0 - t) * 3.0)
+				samples[idx] += sin(TAU * bass_f * i / RATE) * 0.12 * benv
 	var fade = int(0.05 * RATE)
 	for i in range(fade):
 		var k = float(i) / fade

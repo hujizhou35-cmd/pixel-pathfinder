@@ -50,6 +50,11 @@ var seen_cgs: Array = []
 var _cg_pending_node = null      # CG 播放后待进入的节点（区域 5 首领战前 CG）
 var _cg_skip_once: bool = false  # 防止 CG 后再次触发同一 CG
 
+# 周目大 Boss（区域 5 通关后、进入新周目前的压轴战；运行态，不入存档）
+var _in_cycle_boss: bool = false
+var _cycle_boss_def = null
+var pending_cycle_boss: bool = false
+
 # 装备（武器 / 铠甲 / 头盔 / 裤子 / 鞋 / 配饰）
 var equipment = {
 	"weapon": null,
@@ -119,6 +124,16 @@ func _mark_cg(key: String) -> void:
 func _on_cg_finished(tag: String) -> void:
 	match tag:
 		"region_clear":
+			# 最终区域：终局 CG 后进入周目大 Boss 压轴战；其它区域照常结算
+			if region == GameData.BIOMES.size() - 1:
+				_start_cycle_boss_intro()
+			else:
+				_region_clear_after_cg()
+		"cycle_encounter":
+			_begin_cycle_boss_fight()
+		"cycle_victory":
+			_in_cycle_boss = false
+			_cycle_boss_def = null
 			_region_clear_after_cg()
 		"pre_boss":
 			if _cg_pending_node != null:
@@ -128,6 +143,32 @@ func _on_cg_finished(tag: String) -> void:
 				enter_node(node)
 		_:
 			pass
+
+# ---- 周目大 Boss 压轴战序列 ----
+## 终局 CG 后：选定周目 Boss，播 [噩梦旁白 19, 遇见 CG]（紧张配乐）
+func _start_cycle_boss_intro() -> void:
+	_cycle_boss_def = GameData.pick_cycle_boss(cycle)
+	var enc = int(_cycle_boss_def.get("encounter_cg", 20))
+	SignalBus.play_cg.emit([GameData.CG_CYCLE_INTRO, enc], "cycle_encounter")
+
+## 遇见 CG 后：进入周目大 Boss 战斗（满血压轴）
+func _begin_cycle_boss_fight() -> void:
+	if _cycle_boss_def == null:
+		_cycle_boss_def = GameData.pick_cycle_boss(cycle)
+	_in_cycle_boss = true
+	hp = max_hp
+	SignalBus.hp_changed.emit(hp, max_hp)
+	change_state(State.COMBAT)
+	combat_state = CombatManager.setup_cycle_boss(cycle, _cycle_boss_def)
+	SignalBus.combat_started.emit(combat_state.enemies)
+	SignalBus.view_changed.emit("combat")
+
+## 周目大 Boss 击败后：播 [战败 CG, 新周目欢迎 28]（激昂配乐）
+func _cycle_boss_victory() -> void:
+	var def_cg = 21
+	if _cycle_boss_def != null:
+		def_cg = int(_cycle_boss_def.get("defeat_cg", 21))
+	SignalBus.play_cg.emit([def_cg, GameData.CG_CYCLE_OUTRO], "cycle_victory")
 
 ## 关闭窗口时自动保存（地图状态下覆盖保存；其它状态保留进节点前的快照）
 func _notification(what: int) -> void:
@@ -373,8 +414,8 @@ func sell_bag_item(index: int) -> void:
 # ============================================================
 # 精铸制度（区域效能）
 # 分解：销毁背包装备 → 精粹（普1/稀3/史8/传20）
-# 精铸：消耗 5 精粹，把史诗/传说装备的基础数值提升到
-#       当前最高区域的基准值（强化等级与词条不变）
+# 精铸：每消耗 5 精粹，把史诗/传说装备的基准区域 +1（如区域 16→17），
+#       多次精铸逐级追平当前最高区域基准（强化等级与词条不变）
 # ============================================================
 func dismantle_bag_item(index: int) -> bool:
 	if index < 0 or index >= bag.size():
@@ -410,20 +451,19 @@ func refine_item(target: Dictionary) -> bool:
 		SignalBus.show_toast.emit("精粹不足（精铸需要 %d，现有 %d）" % [cost, refine_dust])
 		return false
 	refine_dust -= cost
-	var old_atk = int(it.stats.atk)
-	it["stats"] = EquipmentFactory.baseline_stats(it, best_eff)
-	it["tier_eff"] = best_eff
-	it["value"] = EquipmentFactory.baseline_value(it, best_eff)
+	# 增量精铸：每次只提升 1 个区域基准（如区域 16 → 17），需多次精铸才能追平最高区域
+	var old_eff = int(it.get("tier_eff", 0))
+	var new_eff = mini(best_eff, old_eff + 1)
+	it["stats"] = EquipmentFactory.baseline_stats(it, new_eff)
+	it["tier_eff"] = new_eff
+	it["value"] = EquipmentFactory.baseline_value(it, new_eff)
 	_recalc_stats()
 	hp = mini(hp, max_hp)
 	SignalBus.gold_changed.emit(gold)
 	SignalBus.hp_changed.emit(hp, max_hp)
 	SignalBus.bag_changed.emit(bag.duplicate())
 	SignalBus.equipment_changed.emit(str(it.get("slot", "weapon")), it)
-	if it.stats.atk > 0:
-		SignalBus.show_toast.emit("精铸完成：「%s」基础攻击 %d → %d" % [str(it.get("name", "装备")), old_atk, int(it.stats.atk)])
-	else:
-		SignalBus.show_toast.emit("精铸完成：「%s」基础数值已提升至当前区域基准" % str(it.get("name", "装备")))
+	SignalBus.show_toast.emit("精铸完成：「%s」基准区域 %d → %d（还差 %d 级至最高 %d）" % [str(it.get("name", "装备")), old_eff + 1, new_eff + 1, best_eff - new_eff, best_eff + 1])
 	Sfx.play("upgrade")
 	save_game()
 	return true
@@ -474,8 +514,8 @@ func get_forge_cost() -> int:
 func can_smelt(item: Dictionary) -> bool:
 	return int(item.get("rarity", 0)) >= GameData.Rarity.EPIC and item.get("affixes", []).size() > 0
 
-## 熔炼：销毁装备，收费 40 金，随机萃取其一条词条为精华（不再由玩家挑选）
-func smelt_bag_item(index: int) -> bool:
+## 熔炼：销毁装备，收费 40 金，由玩家自选其中一条词条萃取为精华
+func smelt_bag_item(index: int, affix_key: String = "") -> bool:
 	if index < 0 or index >= bag.size():
 		return false
 	var it = bag[index]
@@ -484,18 +524,22 @@ func smelt_bag_item(index: int) -> bool:
 	if essences.size() >= GameData.COMBAT["essence_cap"]:
 		SignalBus.show_toast.emit("精华袋已满（%d/%d）" % [essences.size(), GameData.COMBAT["essence_cap"]])
 		return false
+	# 未指定时回退为随机（兼容旧调用）；指定时必须是该装备拥有的词条
+	if affix_key == "":
+		affix_key = str(it.affixes[randi() % it.affixes.size()])
+	elif not it.affixes.has(affix_key):
+		return false
 	var cost = int(GameData.COMBAT["smelt_cost"])
 	if gold < cost:
 		SignalBus.show_toast.emit("金币不足（熔炼需要 %d）" % cost)
 		return false
 	gold -= cost
-	var affix_key = str(it.affixes[randi() % it.affixes.size()])
 	essences.append({ "affix": affix_key, "from": str(it.get("name", it.base_name)) })
 	bag.remove_at(index)
 	var ad = GameData.AFFIXES.get(affix_key, {})
 	SignalBus.gold_changed.emit(gold)
 	SignalBus.bag_changed.emit(bag.duplicate())
-	SignalBus.show_toast.emit("熔炼完成：随机萃取出「%s」词条精华" % ad.get("name", affix_key))
+	SignalBus.show_toast.emit("熔炼完成：萃取出「%s」词条精华" % ad.get("name", affix_key))
 	Sfx.play("upgrade")
 	save_game()
 	return true
@@ -920,14 +964,20 @@ func handle_drop(choice: String) -> void:
 			SignalBus.show_toast.emit("已出售，获得 %d 金币" % val)
 
 	pending_drop = null
-	if pending_boss:
+	if pending_cycle_boss:
+		pending_cycle_boss = false
+		_cycle_boss_victory()
+	elif pending_boss:
 		pending_boss = false
 		region_clear()
 	else:
 		close_reward()
 
 func close_reward() -> void:
-	if pending_boss:
+	if pending_cycle_boss:
+		pending_cycle_boss = false
+		_cycle_boss_victory()
+	elif pending_boss:
 		pending_boss = false
 		region_clear()
 	else:
@@ -1041,6 +1091,10 @@ func next_region() -> void:
 
 func player_defeated() -> void:
 	change_state(State.DEAD)
+	# 若死于周目大 Boss：清除压轴战标志，回到区域 5 起点重新闯关（周目未推进）
+	_in_cycle_boss = false
+	_cycle_boss_def = null
+	pending_cycle_boss = false
 	var lost = floori(gold / 2.0)
 	gold -= lost
 	SignalBus.gold_changed.emit(gold)

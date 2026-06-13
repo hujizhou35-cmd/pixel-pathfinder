@@ -96,6 +96,12 @@ func _grant_player_shield(stats: Dictionary, base: float) -> int:
 func _enemy_shield_mult() -> float:
 	return 1.0 + GameState.cycle * GameData.COMBAT["cycle_enemy_shield_mult"]
 
+## 怪物护盾上限：始终低于其生命上限的 60%
+func _cap_enemy_shield(e) -> void:
+	var cap = maxi(1, floori(float(e.maxhp) * 0.6))
+	if int(e.get("shield", 0)) > cap:
+		e.shield = cap
+
 # ------------------------------------------------------------
 # 先后手机制
 # - 玩家普攻/防御/药水为先手动作：只有"先手(feral)"风格的怪抢先行动
@@ -552,6 +558,7 @@ func _process_enemy_action(e, idx: int) -> void:
 		if (e.guard_turn - 1) % 3 == 0:
 			var gs = maxi(2, roundi(e.maxhp * 0.12 * _enemy_shield_mult()))
 			e.shield += gs
+			_cap_enemy_shield(e)
 			SignalBus.enemy_shield_changed.emit(idx, e.shield)
 			SignalBus.combat_log_message.emit("%s 举盾坚守，获得 %d 护盾（本回合不攻击）" % [e.name, gs], "enemy")
 			Sfx.play("shield")
@@ -581,6 +588,7 @@ func _process_enemy_action(e, idx: int) -> void:
 	if str(e.get("style", "normal")) == "bash" and e.hp > 0:
 		var bs = maxi(1, roundi(float(e.atk) * 0.6 * _enemy_shield_mult()))
 		e.shield += bs
+		_cap_enemy_shield(e)
 		SignalBus.enemy_shield_changed.emit(idx, e.shield)
 		SignalBus.combat_log_message.emit("%s 盾击姿态：获得 %d 护盾" % [e.name, bs], "enemy")
 
@@ -607,6 +615,7 @@ func _boss_trait_action(e, idx: int) -> bool:
 		T.shield_used = true
 		var s = roundi(e.maxhp * 0.25 * _enemy_shield_mult())
 		e.shield += s
+		_cap_enemy_shield(e)
 		SignalBus.enemy_shield_changed.emit(idx, e.shield)
 		SignalBus.combat_log_message.emit("%s 凝聚岩壳进入护盾阶段！+%d 护盾" % [e.name, s], "enemy")
 		Sfx.play("shield")
@@ -743,17 +752,21 @@ func _combat_end(victory: bool) -> void:
 	busy = false
 	phase = Phase.END
 	if victory:
+		var is_cycle = bool(combat_data.get("cycle_boss", false))
 		var rewards = LootSystem.calculate_combat_rewards(
 			combat_data.enemies,
 			combat_data.is_boss,
-			combat_data.is_elite
+			combat_data.is_elite,
+			"cycleboss" if is_cycle else ""
 		)
 		GameState.add_gold(rewards.gold)
 		GameState.run_stats.gold_earned += rewards.gold
 		if rewards.drop:
 			GameState.run_stats.items_looted += 1
 		GameState.pending_drop = rewards.drop
-		GameState.pending_boss = combat_data.is_boss
+		# 周目大 Boss 走专属胜利链（战败 CG + 新周目欢迎 → 进入下一周目）
+		GameState.pending_cycle_boss = is_cycle
+		GameState.pending_boss = combat_data.is_boss and not is_cycle
 		GameState.change_state(GameState.State.REWARD)
 		SignalBus.combat_ended.emit(true)
 		Sfx.play("victory")

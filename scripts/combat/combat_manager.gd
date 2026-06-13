@@ -136,8 +136,9 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 
 	var shield = 0
 	if affixes.has("shielded"):
-		# 结界护盾随周目增强
+		# 结界护盾随周目增强；但始终低于生命上限的 60%
 		shield = roundi(st.hp * 0.25 * (1.0 + cycle * GameData.COMBAT["cycle_enemy_shield_mult"]))
+		shield = mini(shield, maxi(1, floori(st.hp * 0.6)))
 
 	return {
 		"name": name,
@@ -171,6 +172,48 @@ static func build_enemy(foe: Dictionary, region: int, cycle: int) -> Dictionary:
 		"acted": false,        # 先后手机制：本回合是否已行动
 		"guard_turn": 0,       # 坚守风格：举盾计数
 	}
+
+## 周目大 Boss 实例：以末区 Boss 数值为基底，再乘 bdef 倍率（明显强于区域 Boss）
+static func build_cycle_boss_enemy(bdef: Dictionary, region: int, cycle: int) -> Dictionary:
+	var base = enemy_stats_for({ "boss": true, "affixes": [] }, region, cycle)
+	var hp = maxi(1, roundi(base.hp * float(bdef.get("hp_mult", 1.5))))
+	var atk = maxi(1, roundi(base.atk * float(bdef.get("atk_mult", 1.5))))
+	var df = maxi(1, roundi(base.def * float(bdef.get("def_mult", 1.4))))
+	var gold_reward = roundi((8.0 + region * 6.0) * 9.0 * (1.0 + cycle * GameData.COMBAT["cycle_gold_mult"]) * randf_range(0.9, 1.1))
+	return {
+		"name": str(bdef.name),
+		"sprite_key": str(bdef.get("sprite", "boss")),
+		"cycle_boss": true,
+		"cycle_sprite": str(bdef.get("sprite", "boss")),
+		"palette": bdef.palette,
+		"maxhp": hp,
+		"hp": hp,
+		"atk": atk,
+		"base_atk": atk,
+		"def": df,
+		"gold_reward": gold_reward,
+		"shield": 0,
+		"is_boss": true,
+		"is_elite": false,
+		"traits": { "list": bdef.get("traits", []).duplicate(), "shield_used": false, "raged": false, "turn": 0 },
+		"affixes": [],
+		"element": "",
+		"style": "normal",
+		"scale": 8.2,
+		"anim": 0, "hit_flash": 0, "counted": false,
+		"stun": 0, "weaken": 0, "burn": 0, "burn_dmg": 0,
+		"sunder": 0, "sunder_turns": 0, "berserk_done": false,
+		"acted": false, "guard_turn": 0,
+	}
+
+## 建立周目大 Boss 战斗（单体压轴战）
+static func setup_cycle_boss(cycle: int, bdef: Dictionary) -> Dictionary:
+	var region = GameData.BIOMES.size() - 1
+	var data = setup_combat(region, cycle, false, false, [])
+	data.enemies = [build_cycle_boss_enemy(bdef, region, cycle)]
+	data.is_boss = true
+	data.cycle_boss = true
+	return data
 
 ## 建立战斗数据；foes 为空时现场掷一组（事件遭遇战等）
 static func setup_combat(region: int, cycle: int, elite: bool, boss: bool, foes: Array = []) -> Dictionary:

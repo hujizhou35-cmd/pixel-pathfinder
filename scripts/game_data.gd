@@ -445,6 +445,7 @@ const DROP_RULES = {
 	"normal": { "chance": 30.0, "region_bonus": 4.0, "min_rarity": -1 },
 	"elite":  { "chance": 100.0, "region_bonus": 0.0, "min_rarity": Rarity.RARE },
 	"boss":   { "chance": 100.0, "region_bonus": 0.0, "min_rarity": Rarity.EPIC },
+	"cycleboss": { "chance": 100.0, "region_bonus": 0.0, "min_rarity": Rarity.EPIC },
 }
 
 # 稀有度抽取权重（普通怪 / 精英 / 首领）
@@ -454,6 +455,7 @@ const RARITY_WEIGHTS = {
 	"normal": [0.58, 0.30, 0.105, 0.015],
 	"elite":  [0.00, 0.70, 0.30, 0.00],
 	"boss":   [0.00, 0.00, 0.70, 0.30],
+	"cycleboss": [0.00, 0.00, 0.60, 0.40],   # 周目大 Boss：史诗:传说 = 6:4
 	"shop":   [0.32, 0.44, 0.225, 0.015],
 	"chest":  [0.42, 0.37, 0.18, 0.03],
 }
@@ -685,14 +687,68 @@ const CG_DATA = {
 		"text": "同伴们在封印之环前列阵，刀锋、法杖与圣器同时指向天空。守护者自黄金光幕中缓缓苏醒，整座遗迹随之震颤。远征者已踏入命运核心，最后的战斗，终于拉开帷幕。" },
 	12: { "title": "决战 · 意志相撞",
 		"text": "战斗在轰鸣中爆发。冒险者高举武器，踏着碎裂的石阶直冲而上；守护者则以无可匹敌的古代之力回应，符文、烈光与崩裂的岩石在半空交错。每一次碰撞，都像是在撼动整座遗迹的命脉。此刻已无退路，唯有以意志回应意志，以火焰击碎永恒。" },
-	13: { "title": "轮回开启",
-		"text": "当守护者倒下，遗迹却并未沉入死寂。相反，远方的五大区域再度泛起光芒，仿佛这场远征从未真正结束。探险者立于废墟之上，回望那条已经走过的道路，终于明白：所谓终点，不过是下一次轮回的起点。更深的试炼，正在黑暗尽头静静等待。\n\n“寻路者，欢迎来到新周目——这里的敌人……已经记住了你的套路。”" },
+	13: { "title": "远征的尽头",
+		"text": "当最后一道封印归于沉寂，永恒守护者的身躯终于崩解。\n\n漂浮千年的遗迹开始缓缓回落，失控的古代力量也重新归于静默。\n\n探险者立于破碎祭坛之上，望着久违的天光穿透云层。\n\n这一刻，他以为远征已经结束。" },
+	# ---- 周目大 Boss 终局 CG（final CG/0-9 → 资源 19-28）----
+	19: { "title": "噩梦苏醒",
+		"text": "然而在遗迹最深处，某些从未被记载于典籍中的存在，正循着封印消散后的余温缓缓苏醒。它们并非守护者，也并非这片世界应有之物，而是比轮回更加古老的噩梦。" },
+	20: { "title": "八岐大蛇 · 苏醒",
+		"text": "深渊之下，八首之影正在翻身。古老的蛇神循着封印的余温苏醒，八道目光同时锁定了前路。" },
+	21: { "title": "八岐大蛇 · 退潮",
+		"text": "当最后一颗蛇首坠落，深渊的咒潮随之退去。可世界并未因此安宁——它只是暂时合上了眼。" },
+	22: { "title": "九尾狐 · 抬眸",
+		"text": "月影之中，九尾狐自古咒中抬眸。它并非前来拦路，而是来审判踏入轮回之人。" },
+	23: { "title": "九尾狐 · 星屑",
+		"text": "九尾之火散作漫天星屑，幻影与真身一同崩解。可被击败的，只是这一夜的狐影。" },
+	24: { "title": "巨大三头石像 · 睁眼",
+		"text": "三首石神自沉眠中睁眼。古代王权最后的守门者，正以无声的重量碾向来者。" },
+	25: { "title": "巨大三头石像 · 归尘",
+		"text": "石躯尽碎，王座归尘。守门者倒下之处，新的通路也随之显现。" },
+	26: { "title": "终末虚空兽 · 呼吸",
+		"text": "黑暗深处传来不属于这个世界的呼吸。那并非野兽，而是被轮回喂养出来的终末之形。" },
+	27: { "title": "终末虚空兽 · 回响",
+		"text": "它的躯壳已碎，但虚空仍在回响。被击倒的不是结局，只是更深黑暗的前奏。" },
+	28: { "title": "轮回不息",
+		"text": "古老存在已经倒下，然而轮回并不会因此停滞。\n\n世界正在回应这场胜利。而回应的代价——是更加危险的未来。\n\n“寻路者，欢迎来到新周目——这里的敌人……已经记住了你的套路。”" },
 }
 const CG_INTRO = [14, 15, 16, 17, 18]      # 开场序章（新远征启程时，区域进入 CG 之前）
 const CG_REGION_ENTER = [1, 3, 5, 7, 9]    # 各区域进入前
 const CG_REGION_CLEAR = [2, 4, 6, 8]       # 区域 1-4 首领战后
 const CG_PRE_FINAL_BOSS = 10               # 区域 5 首领战前
 const CG_FINALE = [11, 12, 13]             # 最终首领战后（每周目轮回都播放）
+const CG_CYCLE_INTRO = 19                  # 周目大 Boss 登场旁白（紧接 13 之后）
+const CG_CYCLE_OUTRO = 28                  # 周目大 Boss 击败后 → 新周目欢迎
+
+# ---- 周目大 Boss（区域 5 通关后、进入新周目前的压轴战）----
+# 前四周目按顺序出现，第五周目起随机；明显强于区域 Boss
+const CYCLE_BOSSES = [
+	{ "key": "orochi",  "name": "八岐大蛇", "sprite": "orochi",
+		"palette": { "p": "#3f9a5a", "d": "#1c5230", "e": "#ffe14a", "a": "#7a2f2f" },
+		"traits": ["rage", "summon", "heavy"],
+		"hp_mult": 1.55, "atk_mult": 1.45, "def_mult": 1.40,
+		"encounter_cg": 20, "defeat_cg": 21 },
+	{ "key": "kitsune", "name": "九尾狐", "sprite": "kitsune",
+		"palette": { "p": "#e8763a", "d": "#8a3414", "e": "#fff0c4", "a": "#ffd86a" },
+		"traits": ["heal", "rage", "summon"],
+		"hp_mult": 1.45, "atk_mult": 1.55, "def_mult": 1.30,
+		"encounter_cg": 22, "defeat_cg": 23 },
+	{ "key": "colossus", "name": "巨大三头石像", "sprite": "colossus",
+		"palette": { "p": "#9aa0ae", "d": "#4c505e", "e": "#ffcf5a", "a": "#c4cad8" },
+		"traits": ["shield_phase", "heavy", "rage"],
+		"hp_mult": 1.70, "atk_mult": 1.35, "def_mult": 1.60,
+		"encounter_cg": 24, "defeat_cg": 25 },
+	{ "key": "voidbeast", "name": "终末虚空兽", "sprite": "voidbeast",
+		"palette": { "p": "#6a3fae", "d": "#2c184e", "e": "#48f0d0", "a": "#c46fff" },
+		"traits": ["rage", "heal", "summon", "shield_phase"],
+		"hp_mult": 1.60, "atk_mult": 1.55, "def_mult": 1.45,
+		"encounter_cg": 26, "defeat_cg": 27 },
+]
+
+# cleared_cycle：已通关的周目数（0=第一周目通关）。0-3 按序，≥4 随机
+static func pick_cycle_boss(cleared_cycle: int) -> Dictionary:
+	if cleared_cycle < CYCLE_BOSSES.size():
+		return CYCLE_BOSSES[cleared_cycle]
+	return CYCLE_BOSSES[randi() % CYCLE_BOSSES.size()]
 
 static func get_cg(id: int) -> Dictionary:
 	return CG_DATA.get(id, { "title": "", "text": "" })

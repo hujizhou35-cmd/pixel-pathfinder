@@ -85,7 +85,13 @@ func play(ids: Array, tag: String) -> void:
 	_queue = ids.duplicate()
 	_tag = tag
 	visible = true
-	Sfx.start_cg_music()
+	# 周目大 Boss 终局 CG 用更响、更具情绪的专属配乐
+	var mood := "narrative"
+	if tag == "cycle_encounter":
+		mood = "tense"
+	elif tag == "cycle_victory":
+		mood = "triumph"
+	Sfx.start_cg_music(mood)
 	_show_current()
 
 func _show_current() -> void:

@@ -148,6 +148,27 @@ func _run() -> void:
 	await _shot("07_combat_bow")
 	await _wait(2.2)
 
+	# 周目大 Boss 压轴战：四只新程序化精灵逐一截图
+	GameState.region = 4
+	GameState.cycle = 0
+	for k in range(GameData.CYCLE_BOSSES.size()):
+		var bdef = GameData.CYCLE_BOSSES[k]
+		GameState.combat_state = CombatManager.setup_cycle_boss(0, bdef)
+		SignalBus.combat_started.emit(GameState.combat_state.enemies)
+		SignalBus.view_changed.emit("combat")
+		await _wait(0.7)
+		await _shot("07b_cycleboss_%d_%s" % [k, str(bdef.key)])
+	# 周目大 Boss 登场 CG（验证新 CG 资源链路）
+	SignalBus.play_cg.emit([19, 20], "cycle_encounter")
+	await _wait(0.6)
+	await _shot("07c_cycleboss_cg")
+	main_node.cg_layer.skip_all()
+	await _wait(0.3)
+	GameState.region = 0
+	GameState.change_state(GameState.State.MAP)
+	SignalBus.view_changed.emit("map")
+	await _wait(0.3)
+
 	# 奖励 + 背包叠加（含熔炼按钮/精华区/分类页签）
 	GameState.bag.append(EquipmentFactory.generate_item(2, "weapon", GameData.Rarity.EPIC))
 	GameState.bag.append(EquipmentFactory.generate_item(2, "helmet", GameData.Rarity.RARE))
@@ -160,6 +181,11 @@ func _run() -> void:
 	SignalBus.show_modal.emit("bag", {})
 	await _wait(0.4)
 	await _shot("09_bag_over_reward")
+	modal.close_all()
+	# 展开第 1 件物品 → 验证折叠/展开（名称+特性+操作按钮）
+	SignalBus.show_modal.emit("bag", { "expanded": [0] })
+	await _wait(0.4)
+	await _shot("09a_bag_expanded")
 	modal.close_all()
 	SignalBus.show_modal.emit("bag", { "filter": "clothes" })
 	await _wait(0.4)

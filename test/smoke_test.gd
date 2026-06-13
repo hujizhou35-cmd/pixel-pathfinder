@@ -70,14 +70,15 @@ func _force_player_turn() -> void:
 func _run() -> void:
 	var modal = main_node.modal_layer
 
-	# ---- 0. CG 资源与数据（含开场序章 14-18） ----
-	_check(GameData.CG_DATA.size() == 18, "CG 文案共 18 条（含序章 5 条）")
+	# ---- 0. CG 资源与数据（含开场序章 14-18、周目大 Boss 终局 19-28） ----
+	_check(GameData.CG_DATA.size() == 28, "CG 文案共 28 条（含序章 5 + 周目终局 10）")
 	var cg_files_ok = true
-	for i in range(1, 19):
+	for i in range(1, 29):
 		if not FileAccess.file_exists("res://assets/cg/%d.png" % i):
 			cg_files_ok = false
-	_check(cg_files_ok, "18 张 CG 图片资源齐全")
+	_check(cg_files_ok, "28 张 CG 图片资源齐全")
 	_check(GameData.CG_INTRO == [14, 15, 16, 17, 18], "序章 CG 列表为 14-18")
+	_check(GameData.CG_CYCLE_INTRO == 19 and GameData.CG_CYCLE_OUTRO == 28, "周目终局 CG 锚点 19/28")
 
 	# ---- 1. 新游戏（带起名与天赋点） ----
 	GameState.start_new_game(2, "测试勇者", { "vit": 4, "str": 3, "tough": 2, "agi": 1 })
@@ -270,18 +271,29 @@ func _run() -> void:
 	var sets = EquipmentModifier.get_active_sets(eq_test)
 	_check(sets.size() == 1 and sets[0].prefix == "风暴" and sets[0].count == 2, "武器+头盔同前缀 2 件激活套装")
 
-	# ---- 9. 熔炼（收费 40 · 随机萃取）与锻打 ----
+	# ---- 9. 熔炼（收费 40 · 自选词条萃取）与锻打 ----
 	var epic = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.EPIC)
+	# 固定为两条可锻打词条以验证"自选"并供后续锻打测试
+	epic["affixes"] = ["crit", "block"]
 	GameState.bag.clear()
 	GameState.bag.append(epic)
 	GameState.essences.clear()
 	var epic_affixes = epic.affixes.duplicate()
+	var chosen_affix = str(epic_affixes[epic_affixes.size() - 1])   # 指定萃取最后一条
 	var gold_smelt = GameState.gold
-	var ok_smelt = GameState.smelt_bag_item(0)
+	var ok_smelt = GameState.smelt_bag_item(0, chosen_affix)
 	_check(ok_smelt and GameState.essences.size() == 1 and GameState.bag.is_empty(), "熔炼史诗装备 → 词条精华")
 	_check(GameState.gold == gold_smelt - GameData.COMBAT["smelt_cost"], "熔炼收费 %d 金" % int(GameData.COMBAT["smelt_cost"]))
 	var target_affix = str(GameState.essences[0].affix)
-	_check(epic_affixes.has(target_affix), "随机萃取的词条来自原装备词条")
+	_check(target_affix == chosen_affix, "熔炼萃取的是【玩家自选】的词条")
+	# 不属于该装备的词条不可萃取
+	GameState.bag.clear()
+	var epic2 = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.EPIC)
+	epic2["affixes"] = ["crit"]
+	GameState.bag.append(epic2)
+	_check(not GameState.smelt_bag_item(0, "block"), "不可萃取装备不存在的词条")
+	GameState.bag.clear()
+	# 注意：保留上面熔炼得到的精华（essences[0].affix == target_affix）供下方锻打测试
 	var wpn = GameState.equipment.weapon
 	wpn["affixes"] = []
 	wpn["affix_lv"] = {}
@@ -368,7 +380,8 @@ func _run() -> void:
 	_check(GameState.dismantle_bag_item(0), "分解装备成功")
 	_check(GameState.refine_dust == dust_before + 3, "稀有装备分解得 3 精粹 (实际 +%d)" % (GameState.refine_dust - dust_before))
 	_check(GameData.dust_gain(GameData.Rarity.LEGENDARY) == 20 and GameData.dust_gain(GameData.Rarity.EPIC) == 8, "分解精粹值：史诗8/传说20")
-	# 低区域出厂的史诗装备 → 精铸到当前最高区域基准
+	# 增量精铸：每 5 精粹只提升 1 个区域基准（需多次精铸追平最高区域）
+	GameState.best_eff = maxi(GameState.best_eff, 4)   # 确保有 >1 级的提升空间
 	var old_epic = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("fire_战斧"), 0, GameData.Rarity.EPIC)
 	old_epic["affixes"] = ["crit"]
 	old_epic["level"] = 3
@@ -377,12 +390,16 @@ func _run() -> void:
 	_check(GameState.can_refine(old_epic), "低基准史诗装备可精铸 (best_eff=%d)" % GameState.best_eff)
 	GameState.refine_dust = 10
 	var atk_before_r = int(old_epic.stats.atk)
-	var expected_base = EquipmentFactory.baseline_stats(old_epic, GameState.best_eff)
-	_check(GameState.refine_item({ "kind": "bag", "index": GameState.bag.size() - 1 }), "精铸执行成功")
+	var bag_idx_r = GameState.bag.size() - 1
+	_check(GameState.refine_item({ "kind": "bag", "index": bag_idx_r }), "精铸执行成功")
 	_check(GameState.refine_dust == 5, "精铸消耗 5 精粹")
-	_check(int(old_epic.stats.atk) == int(expected_base.atk) and int(old_epic.stats.atk) > atk_before_r, "精铸后攻击提升到区域基准 (%d→%d)" % [atk_before_r, int(old_epic.stats.atk)])
+	_check(int(old_epic.tier_eff) == 1, "增量精铸：基准区域 0 → 1（+1 级）")
+	_check(int(old_epic.stats.atk) > atk_before_r, "精铸后攻击随基准提升 (%d→%d)" % [atk_before_r, int(old_epic.stats.atk)])
 	_check(int(old_epic.level) == 3 and old_epic.affixes.has("crit"), "精铸保留强化等级与词条")
-	_check(int(old_epic.tier_eff) == GameState.best_eff and not GameState.can_refine(old_epic), "精铸后基准更新为当前最高")
+	_check(GameState.can_refine(old_epic), "未达最高区域仍可继续精铸")
+	# 再次精铸 → 再 +1 级
+	_check(GameState.refine_item({ "kind": "bag", "index": bag_idx_r }), "第二次精铸执行成功")
+	_check(int(old_epic.tier_eff) == 2, "再次精铸：基准区域 1 → 2")
 	var common_it = EquipmentFactory.build_from_entry(ItemCatalog.get_entry("metal_长剑"), 0, GameData.Rarity.COMMON)
 	common_it["tier_eff"] = 0
 	_check(not GameState.can_refine(common_it), "普通/稀有装备不可精铸")
@@ -740,15 +757,53 @@ func _run() -> void:
 	modal.close_all()
 	GameState.perks = ["berserker"]   # 留出空位，供下一节追加
 
-	# ---- 17. 无限周目：通关第 5 区（里程碑）→ 终局 CG → 天赋三选一 → 强化周目 ----
+	# ---- 16c. 周目大 Boss 数据与构造 ----
+	_check(GameData.CYCLE_BOSSES.size() == 4, "周目大 Boss 共 4 只")
+	_check(str(GameData.pick_cycle_boss(0).key) == "orochi", "第一周目 → 八岐大蛇")
+	_check(str(GameData.pick_cycle_boss(1).key) == "kitsune", "第二周目 → 九尾狐")
+	_check(str(GameData.pick_cycle_boss(2).key) == "colossus", "第三周目 → 三头石像")
+	_check(str(GameData.pick_cycle_boss(3).key) == "voidbeast", "第四周目 → 虚空兽")
+	var rand_ok = true
+	for _i in range(20):
+		if GameData.pick_cycle_boss(7) == null:
+			rand_ok = false
+	_check(rand_ok, "第五周目起随机出现其一")
+	var cb_data = CombatManager.setup_cycle_boss(0, GameData.CYCLE_BOSSES[0])
+	var cb_e = cb_data.enemies[0]
+	var region_boss_hp = CombatManager.enemy_stats_for({ "boss": true, "affixes": [] }, 4, 0).hp
+	_check(cb_data.enemies.size() == 1 and bool(cb_e.get("cycle_boss", false)), "周目大 Boss：单体压轴战")
+	_check(int(cb_e.maxhp) > region_boss_hp, "周目大 Boss 明显强于区域 Boss (%d > %d)" % [int(cb_e.maxhp), region_boss_hp])
+	_check(int(cb_e.get("shield", 0)) <= floori(cb_e.maxhp * 0.6), "周目大 Boss 护盾遵守 60%% 上限")
+
+	# ---- 17. 无限周目：通关第 5 区 → 终局 CG → 周目大 Boss 压轴战 → 天赋三选一 → 强化周目 ----
 	GameState.region = 4
+	GameState.cycle = 0
+	GameState.perks = []
 	GameState.change_state(GameState.State.REWARD)
 	GameState.region_clear()
 	await _frames(2)
 	_check(main_node.cg_layer.is_playing(), "最终首领战后播放终局三连 CG")
 	main_node.cg_layer.skip_all()
+	await _frames(3)
+	# 终局 CG 后进入周目大 Boss 序列（噩梦旁白 19 + 遇见 CG）
+	_check(main_node.cg_layer.is_playing(), "终局 CG 后播放周目大 Boss 登场 CG")
+	_check(GameState._cycle_boss_def != null and str(GameState._cycle_boss_def.key) == "orochi", "第一周目周目 Boss 为八岐大蛇")
+	main_node.cg_layer.skip_all()
+	await _frames(3)
+	# 遇见 CG 后进入压轴战
+	_check(GameState.current_state == GameState.State.COMBAT and GameState._in_cycle_boss, "遇见 CG 后进入周目大 Boss 战")
+	_check(bool(GameState.combat_state.enemies[0].get("cycle_boss", false)), "战斗对象为周目大 Boss")
+	# 模拟击败周目大 Boss（结算战利品 → 关闭 → 周目胜利 CG）
+	main_node.combat_node._combat_end(true)
+	await _frames(2)
+	_check(GameState.pending_cycle_boss, "击败周目 Boss → 走专属胜利结算")
+	GameState.close_reward()
+	await _frames(2)
+	_check(main_node.cg_layer.is_playing(), "周目 Boss 战败 CG + 新周目欢迎播放")
+	main_node.cg_layer.skip_all()
 	await _frames(4)
-	_check(modal._current_type == "perk_choice", "区域 5（里程碑）通关后弹出天赋三选一")
+	_check(not GameState._in_cycle_boss, "周目 Boss 序列结束，标志复位")
+	_check(modal._current_type == "perk_choice", "周目大 Boss 后弹出天赋三选一（里程碑）")
 	var offers: Array = modal._current_data.get("offers", [])
 	_check(offers.size() == 3, "天赋词条三选一 (实际 %d)" % offers.size())
 	var pick = str(offers[0])

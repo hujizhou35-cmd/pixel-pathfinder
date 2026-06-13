@@ -1045,6 +1045,183 @@ static func _draw_boss_arcane(img: Image, oy: int, f: int, p: Color, d: Color, e
 	_rect(img, 14, by + 17, 3, 2, _dark(d, 0.8))
 
 # ============================================================
+# 周目大 Boss 精灵（48×48 大画布，独特剪影，2 帧呼吸）
+# ============================================================
+static func cycle_boss_texture(sprite_key: String, palette: Dictionary) -> ImageTexture:
+	var key = "cycleboss|%s" % sprite_key
+	if _cache.has(key):
+		return _cache[key]
+	var sz := Vector2i(48, 48)
+	var img = _img(sz.x, sz.y * 2)
+	for f in range(2):
+		var frame = _img(sz.x, sz.y)
+		_draw_cycle_boss(frame, sprite_key, palette, 0, f)
+		_apply_outline(frame, OUTLINE)
+		img.blit_rect(frame, Rect2i(0, 0, sz.x, sz.y), Vector2i(0, f * sz.y))
+	var t = _tex(img)
+	_cache[key] = t
+	return t
+
+static func _draw_cycle_boss(img: Image, key: String, pal: Dictionary, oy: int, f: int) -> void:
+	var p = _c(pal.get("p", "#888"))
+	var d = _c(pal.get("d", "#444"))
+	var e = _c(pal.get("e", "#fff"))
+	var a = _c(pal.get("a", "#999"))
+	match key:
+		"orochi": _draw_cb_orochi(img, oy, f, p, d, e, a)
+		"kitsune": _draw_cb_kitsune(img, oy, f, p, d, e, a)
+		"colossus": _draw_cb_colossus(img, oy, f, p, d, e, a)
+		_: _draw_cb_voidbeast(img, oy, f, p, d, e, a)
+
+static func _draw_cb_orochi(img: Image, oy: int, f: int, p: Color, d: Color, e: Color, a: Color) -> void:
+	# 盘踞身躯
+	for yy in range(30, 47):
+		var t = float(yy - 30) / 17.0
+		var w = int(12 + 11 * t)
+		var col = p if int(yy) % 2 == 0 else _dark(p, 0.82)
+		_hline(img, 24 - w, oy + yy, w * 2, col)
+	_hline(img, 11, oy + 46, 26, d)
+	for i in range(7):
+		_px(img, 12 + i * 4, oy + 38 + (i % 2), _dark(p, 0.6))
+	# 五条蛇颈（八岐之首）
+	var necks = [[9, 17, -1], [16, 25, 1], [24, 30, 0], [32, 25, 1], [39, 17, -1]]
+	for n in necks:
+		var bx: int = n[0]
+		var nh: int = n[1]
+		var dir: int = n[2]
+		var hx := bx
+		var hy := oy + 31
+		for k in range(nh):
+			var yy = oy + 31 - k
+			var off = int(round(sin(k * 0.35 + f * 0.6) * 2.2)) * dir
+			var cx = bx + off
+			_px(img, cx, yy, p)
+			_px(img, cx + 1, yy, p)
+			_px(img, cx - 1, yy, _dark(p, 0.78))
+			hx = cx
+			hy = yy
+		# 蛇头
+		_rect(img, hx - 2, hy - 3, 6, 4, p)
+		_hline(img, hx - 2, hy - 3, 6, _light(p, 0.25))
+		_px(img, hx - 1, hy - 1, e)
+		_px(img, hx + 3, hy - 1, e)
+		_hline(img, hx - 1, hy + 1, 4, a)
+
+static func _draw_cb_kitsune(img: Image, oy: int, f: int, p: Color, d: Color, e: Color, a: Color) -> void:
+	var sway = 1 if f == 1 else 0
+	var tipcol = _light(e, 0.5)
+	# 九条灵尾（背后扇形展开，橙身白尖、带弧度飘动）
+	var tails = 9
+	for i in range(tails):
+		var ang = lerpf(-1.28, 1.28, float(i) / float(tails - 1))
+		var tlen = 22
+		for k in range(tlen):
+			var curve = sin(float(k) / float(tlen) * PI) * 2.6
+			var tx = 24 + int(round(sin(ang) * k + cos(ang) * curve))
+			var ty = oy + 33 - int(round(cos(ang) * k)) + (sway if k > 14 else 0)
+			var col = p
+			if k >= tlen - 5:
+				col = tipcol
+			elif k % 6 == 0:
+				col = _light(p, 0.2)
+			_px(img, tx, ty, col)
+			_px(img, tx + 1, ty, _dark(p, 0.82))
+	# 坐姿身躯（上窄下收，倒水滴）
+	for yy in range(28, 45):
+		var t = float(yy - 28) / 17.0
+		var w = maxi(4, int(9 - 3 * t + 2 * sin(t * PI)))
+		_hline(img, 24 - w, oy + yy, w * 2, p if int(yy) % 2 == 0 else _dark(p, 0.9))
+	# 白胸
+	_rect(img, 21, oy + 31, 6, 10, _light(e, 0.4))
+	# 头盖
+	_rect(img, 18, oy + 18, 12, 9, p)
+	_hline(img, 18, oy + 18, 12, _light(p, 0.2))
+	# 两只三角耳
+	for r in range(6):
+		_hline(img, 18, oy + 12 + r, r + 1, p)
+		_hline(img, 29 - r, oy + 12 + r, r + 1, p)
+	_px(img, 19, oy + 16, a); _px(img, 28, oy + 16, a)
+	# 尖白吻
+	_rect(img, 21, oy + 25, 6, 4, _light(e, 0.45))
+	_rect(img, 22, oy + 28, 4, 2, _light(e, 0.45))
+	_px(img, 23, oy + 29, d); _px(img, 24, oy + 29, d)
+	# 狐眼（金色细长，带描边）
+	_px(img, 20, oy + 22, e); _px(img, 21, oy + 22, e)
+	_px(img, 27, oy + 22, e); _px(img, 26, oy + 22, e)
+	_px(img, 20, oy + 23, d); _px(img, 27, oy + 23, d)
+	# 前爪
+	_rect(img, 19, oy + 42, 3, 4, _light(e, 0.3))
+	_rect(img, 26, oy + 42, 3, 4, _light(e, 0.3))
+
+static func _draw_cb_colossus(img: Image, oy: int, f: int, p: Color, d: Color, e: Color, a: Color) -> void:
+	var by = oy + 6
+	var glow = e if f == 0 else _light(e, 0.4)
+	# 宽肩躯干
+	_rect(img, 10, by + 12, 28, 22, p)
+	_vline(img, 10, by + 12, 22, d)
+	_vline(img, 37, by + 12, 22, d)
+	for yy in range(14, 34, 4):
+		_hline(img, 11, by + yy, 26, _dark(p, 0.72))
+	for xx in range(16, 38, 8):
+		_vline(img, xx, by + 12, 22, _dark(p, 0.72))
+	# 胸口符文（脉动）
+	_rect(img, 21, by + 20, 6, 6, _dark(p, 0.5))
+	_px(img, 23, by + 22, glow); _px(img, 24, by + 23, glow); _px(img, 23, by + 24, glow)
+	# 三头：中央高、两侧低
+	_rect(img, 19, by - 4, 10, 10, p)
+	_hline(img, 19, by - 4, 10, _light(p, 0.2))
+	_px(img, 21, by, glow); _px(img, 26, by, glow)
+	_hline(img, 21, by + 3, 6, d)
+	_rect(img, 9, by + 2, 8, 8, p)
+	_px(img, 11, by + 5, glow); _px(img, 14, by + 5, glow)
+	_rect(img, 31, by + 2, 8, 8, p)
+	_px(img, 33, by + 5, glow); _px(img, 36, by + 5, glow)
+	# 巨臂
+	_rect(img, 3, by + 14, 6, 16, p)
+	_vline(img, 3, by + 14, 16, d)
+	_rect(img, 39, by + 14, 6, 16, p)
+	_vline(img, 44, by + 14, 16, d)
+	_rect(img, 2, by + 30, 8, 6, _dark(p, 0.85))
+	_rect(img, 38, by + 30, 8, 6, _dark(p, 0.85))
+	# 腿基座
+	_rect(img, 14, by + 34, 8, 8, _dark(p, 0.9))
+	_rect(img, 26, by + 34, 8, 8, _dark(p, 0.9))
+
+static func _draw_cb_voidbeast(img: Image, oy: int, f: int, p: Color, d: Color, e: Color, a: Color) -> void:
+	var cx = 24
+	var cy = oy + 22
+	var core = e if f == 0 else _light(e, 0.35)
+	# 核心团块
+	for yy in range(-12, 13):
+		var rr = int(round(sqrt(maxf(0.0, 144.0 - yy * yy)) * 0.92))
+		rr = clampi(rr, 0, 15)
+		var col = p if (yy + 24) % 2 == 0 else _dark(p, 0.8)
+		_hline(img, cx - rr, cy + yy, rr * 2, col)
+	# 虚空内核（脉动）
+	_rect(img, cx - 4, cy - 4, 8, 8, _dark(p, 0.4))
+	_rect(img, cx - 2, cy - 2, 4, 4, core)
+	_px(img, cx, cy, _light(core, 0.5))
+	# 多眼
+	var eyes = [[16, oy + 14], [32, oy + 15], [18, oy + 28], [30, oy + 27], [24, oy + 10]]
+	for ey in eyes:
+		_px(img, ey[0], ey[1], core)
+		_px(img, ey[0] + 1, ey[1], a)
+	# 触须
+	var arms = [[10, 1], [16, -1], [24, 1], [32, -1], [38, 1]]
+	for arm in arms:
+		var bx: int = arm[0]
+		var dir: int = arm[1]
+		for k in range(14):
+			var yy = oy + 30 + k
+			var off = int(round(sin(k * 0.5 + f) * 3.0)) * dir
+			var tx = bx + off
+			_px(img, tx, yy, p if k < 10 else a)
+			_px(img, tx + dir, yy, _dark(p, 0.8))
+	# 上方虚空角
+	_px(img, 18, oy + 6, a); _px(img, 17, oy + 4, a)
+	_px(img, 30, oy + 6, a); _px(img, 31, oy + 4, a)
+
+# ============================================================
 # 装备图标：基底形状 × 元素配色（14×14）
 # ============================================================
 static func item_icon(item: Dictionary) -> ImageTexture:

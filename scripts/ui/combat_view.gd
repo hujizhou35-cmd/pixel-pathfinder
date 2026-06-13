@@ -195,7 +195,9 @@ func _enemy_x(i: int, n: int) -> float:
 
 func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 	var tex: Texture2D
-	if e.is_boss:
+	if e.get("cycle_boss", false):
+		tex = PixelArt.cycle_boss_texture(e.get("cycle_sprite", "voidbeast"), e.palette)
+	elif e.is_boss:
 		tex = PixelArt.boss_texture(GameState.region, e.palette)
 	else:
 		tex = PixelArt.enemy_texture(e.get("sprite_key", "slime"), e.palette)
