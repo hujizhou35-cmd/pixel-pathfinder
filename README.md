@@ -1,6 +1,19 @@
-# 像素探路者 (Pixel Pathfinder) v4.0 无尽远征版
+<p align="center">
+  <img src="assets/cg/1.png" alt="Pixel Pathfinder 像素探路者" width="760">
+</p>
+
+<h1 align="center">像素探路者 · Pixel Pathfinder</h1>
+<p align="center">v4.0 无尽远征版 — 节点式地图探索 · 回合制战斗 · 装备驱动成长</p>
 
 一款 Godot 4.x 的 2D 像素风回合制 Roguelite：自由选关探索 + 回合制战斗 + 装备构筑 + 无限周目。
+
+## 游戏画面 / Gallery
+
+<p align="center">
+  <img src="assets/cg/20.png" alt="首领战" width="32%">
+  <img src="assets/cg/12.png" alt="高维战场" width="32%">
+  <img src="assets/cg/1.png" alt="森林开场" width="32%">
+</p>
 
 ## v4.0 无尽远征版改动一览
 
