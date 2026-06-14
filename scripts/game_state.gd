@@ -511,8 +511,9 @@ func apply_cheat(cmd: String) -> bool:
 func get_forge_cost() -> int:
 	return GameData.COMBAT["forge_cost_base"] + region * GameData.COMBAT["forge_cost_region"]
 
+## 可熔炼：任何带词条的装备（不限稀有度），自选一条词条萃取为精华
 func can_smelt(item: Dictionary) -> bool:
-	return int(item.get("rarity", 0)) >= GameData.Rarity.EPIC and item.get("affixes", []).size() > 0
+	return item.get("affixes", []).size() > 0
 
 ## 熔炼：销毁装备，收费 40 金，由玩家自选其中一条词条萃取为精华
 func smelt_bag_item(index: int, affix_key: String = "") -> bool:
@@ -539,6 +540,89 @@ func smelt_bag_item(index: int, affix_key: String = "") -> bool:
 	var ad = GameData.AFFIXES.get(affix_key, {})
 	SignalBus.gold_changed.emit(gold)
 	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.show_toast.emit("熔炼完成：萃取出「%s」词条精华" % ad.get("name", affix_key))
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+## 脱下：把已穿戴装备放回背包（背包满则提示，不脱下）
+func unequip(slot: String) -> bool:
+	var it = equipment.get(slot)
+	if it == null:
+		return false
+	if bag.size() >= GameData.PLAYER_BASE["bag_capacity"]:
+		SignalBus.show_toast.emit("背包已满，无法脱下「%s」" % str(it.get("name", "装备")))
+		return false
+	equipment[slot] = null
+	bag.append(it)
+	_recalc_stats()
+	hp = mini(hp, max_hp)
+	SignalBus.equipment_changed.emit(slot, null)
+	SignalBus.bag_changed.emit(bag.duplicate())
+	SignalBus.hp_changed.emit(hp, max_hp)
+	SignalBus.show_toast.emit("已脱下「%s」，放入背包" % str(it.get("name", "装备")))
+	save_game()
+	return true
+
+## 出售已穿戴装备（直接卖出，不经背包）
+func sell_equipped(slot: String) -> bool:
+	var it = equipment.get(slot)
+	if it == null:
+		return false
+	var val = EquipmentModifier.get_sell_value(it)
+	equipment[slot] = null
+	gold += val
+	_recalc_stats()
+	hp = mini(hp, max_hp)
+	SignalBus.gold_changed.emit(gold)
+	SignalBus.equipment_changed.emit(slot, null)
+	SignalBus.hp_changed.emit(hp, max_hp)
+	SignalBus.show_toast.emit("已出售已穿戴装备，获得 %d 金币" % val)
+	save_game()
+	return true
+
+## 分解已穿戴装备 → 精粹
+func dismantle_equipped(slot: String) -> bool:
+	var it = equipment.get(slot)
+	if it == null:
+		return false
+	var gain = GameData.dust_gain(int(it.get("rarity", 0)))
+	equipment[slot] = null
+	refine_dust += gain
+	_recalc_stats()
+	hp = mini(hp, max_hp)
+	SignalBus.equipment_changed.emit(slot, null)
+	SignalBus.hp_changed.emit(hp, max_hp)
+	SignalBus.show_toast.emit("已分解已穿戴「%s」：精粹 +%d（现有 %d）" % [str(it.get("name", "装备")), gain, refine_dust])
+	Sfx.play("upgrade")
+	save_game()
+	return true
+
+## 熔炼已穿戴装备：自选一条词条萃取为精华（销毁该装备）
+func smelt_equipped(slot: String, affix_key: String = "") -> bool:
+	var it = equipment.get(slot)
+	if it == null or not can_smelt(it):
+		return false
+	if essences.size() >= GameData.COMBAT["essence_cap"]:
+		SignalBus.show_toast.emit("精华袋已满（%d/%d）" % [essences.size(), GameData.COMBAT["essence_cap"]])
+		return false
+	if affix_key == "":
+		affix_key = str(it.affixes[randi() % it.affixes.size()])
+	elif not it.affixes.has(affix_key):
+		return false
+	var cost = int(GameData.COMBAT["smelt_cost"])
+	if gold < cost:
+		SignalBus.show_toast.emit("金币不足（熔炼需要 %d）" % cost)
+		return false
+	gold -= cost
+	essences.append({ "affix": affix_key, "from": str(it.get("name", it.base_name)) })
+	equipment[slot] = null
+	_recalc_stats()
+	hp = mini(hp, max_hp)
+	var ad = GameData.AFFIXES.get(affix_key, {})
+	SignalBus.gold_changed.emit(gold)
+	SignalBus.equipment_changed.emit(slot, null)
+	SignalBus.hp_changed.emit(hp, max_hp)
 	SignalBus.show_toast.emit("熔炼完成：萃取出「%s」词条精华" % ad.get("name", affix_key))
 	Sfx.play("upgrade")
 	save_game()

@@ -66,6 +66,84 @@ func _run() -> void:
 	await _wait(0.5)
 	await _shot("01_title")
 
+	# 敌人精灵画廊：逐一渲染所有怪物精灵，验证细节美化
+	var gallery = Control.new()
+	gallery.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var gbg = ColorRect.new()
+	gbg.color = Color("#23303a")
+	gbg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	gallery.add_child(gbg)
+	main_node.add_child(gallery)
+	var keys = ["slime", "lavablob", "wolf", "scorpion", "spirit", "elemental", "construct", "yeti", "bandit", "bandit2", "mummy", "guardian"]
+	# 每只用各自真实配色，验证「保留原色 + 丰富细节」
+	var gpals = {
+		"slime": { "p": Color("#6fce62"), "d": Color("#2f6b24"), "e": Color("#eafff0"), "a": Color("#1f4a18") },
+		"lavablob": { "p": Color("#ff7a3a"), "d": Color("#a8341e"), "e": Color("#ffe7a0"), "a": Color("#5a1408") },
+		"wolf": { "p": Color("#9aa0ad"), "d": Color("#4a4e5a"), "e": Color("#ffffff"), "a": Color("#33373f") },
+		"scorpion": { "p": Color("#c49a6a"), "d": Color("#6e4a2a"), "e": Color("#ffe0b0"), "a": Color("#3a2410") },
+		"spirit": { "p": Color("#9fb6e8"), "d": Color("#46597f"), "e": Color("#eef4ff"), "a": Color("#2a3550") },
+		"elemental": { "p": Color("#5aa7e8"), "d": Color("#2b5a8a"), "e": Color("#cfeaff"), "a": Color("#163553") },
+		"construct": { "p": Color("#8b8f9c"), "d": Color("#44485a"), "e": Color("#9be8ff"), "a": Color("#2c2f3c") },
+		"yeti": { "p": Color("#d9e6f2"), "d": Color("#7e95ad"), "e": Color("#7ad9ff"), "a": Color("#52677d") },
+		"bandit": { "p": Color("#b07a4e"), "d": Color("#5a3a22"), "e": Color("#ffd23a"), "a": Color("#9a3b34") },
+		"bandit2": { "p": Color("#7a8ec4"), "d": Color("#3a4670"), "e": Color("#ffd23a"), "a": Color("#2a3358") },
+		"mummy": { "p": Color("#cdbf9e"), "d": Color("#7e7152"), "e": Color("#7fe8ff"), "a": Color("#4a4030") },
+		"guardian": { "p": Color("#aeb6c6"), "d": Color("#545c70"), "e": Color("#ffe07a"), "a": Color("#d8434a") },
+	}
+	for gi in range(keys.size()):
+		var gtex = PixelArt.enemy_texture(keys[gi], gpals[keys[gi]])
+		var ga = AtlasTexture.new()
+		ga.atlas = gtex
+		ga.region = Rect2(0, 0, gtex.get_width(), gtex.get_height() / 2.0)
+		var gr = TextureRect.new()
+		gr.texture = ga
+		gr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		gr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		gr.custom_minimum_size = Vector2(180, 180)
+		gr.position = Vector2(40 + (gi % 6) * 200, 60 + (gi / 6) * 240)
+		gr.size = Vector2(180, 180)
+		gallery.add_child(gr)
+		var gl = Label.new()
+		gl.text = keys[gi]
+		gl.position = gr.position + Vector2(0, 184)
+		gl.size = Vector2(180, 20)
+		gl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		gallery.add_child(gl)
+	await _wait(0.3)
+	await _shot("01b_enemy_gallery")
+	gallery.queue_free()
+	await _wait(0.2)
+
+	# 装备图标画廊：各部位 × 元素，验证 20×20 精修图标
+	var ig = Control.new()
+	ig.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var igbg = ColorRect.new()
+	igbg.color = Color("#1a2230")
+	igbg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ig.add_child(igbg)
+	main_node.add_child(ig)
+	var fams = ["短剑", "巨剑", "刺剑", "巨斧", "长弓", "劲弩", "板甲", "龙鳞甲", "锁子甲", "骑士盔", "龙首盔", "战盔", "板甲腿铠", "龙鳞腿甲", "疾风靴", "龙行靴", "铁头靴", "秘语契珠", "圣辉遗物", "铜纹戒指", "银辉徽章", "木刻护符"]
+	var elems = ["metal", "fire", "water", "wood", "earth"]
+	for fi in range(fams.size()):
+		var itx = PixelArt.item_icon({ "family": fams[fi], "element": elems[fi % elems.size()] })
+		var ir = TextureRect.new()
+		ir.texture = itx
+		ir.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		ir.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		ir.position = Vector2(40 + (fi % 8) * 150, 50 + (fi / 8) * 175)
+		ir.size = Vector2(120, 120)
+		ig.add_child(ir)
+		var il = Label.new()
+		il.text = fams[fi]
+		il.position = ir.position + Vector2(0, 122)
+		il.size = Vector2(120, 18)
+		il.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		ig.add_child(il)
+	await _wait(0.3)
+	await _shot("01c_icon_gallery")
+	ig.queue_free()
+	await _wait(0.2)
+
 	# 区域选择
 	SignalBus.show_modal.emit("region_select", { "in_run": false })
 	await _wait(0.4)
@@ -190,6 +268,11 @@ func _run() -> void:
 	SignalBus.show_modal.emit("bag", { "filter": "clothes" })
 	await _wait(0.4)
 	await _shot("09b_bag_clothes_filter")
+	modal.close_all()
+	# 已穿戴装备详情：验证脱下/强化/精铸/熔炼/出售/分解全套按钮
+	SignalBus.show_modal.emit("equip_detail", { "slot": "weapon", "item": GameState.equipment.weapon })
+	await _wait(0.4)
+	await _shot("09d_equip_detail_actions")
 	modal.close_all()
 	GameState.pending_drop = null
 	GameState.change_state(GameState.State.MAP)

@@ -292,6 +292,13 @@ func _run() -> void:
 	epic2["affixes"] = ["crit"]
 	GameState.bag.append(epic2)
 	_check(not GameState.smelt_bag_item(0, "block"), "不可萃取装备不存在的词条")
+	# 新规则：熔炼不再限制稀有度 —— 任何带词条的装备都可熔炼，无词条则不可
+	var rare_smelt = EquipmentFactory.generate_item(0, "armor", GameData.Rarity.RARE)
+	rare_smelt["affixes"] = ["block"]
+	_check(GameState.can_smelt(rare_smelt), "稀有装备(带词条)也可熔炼")
+	var noaffix_item = EquipmentFactory.generate_item(0, "armor", GameData.Rarity.COMMON)
+	noaffix_item["affixes"] = []
+	_check(not GameState.can_smelt(noaffix_item), "无词条装备不可熔炼")
 	GameState.bag.clear()
 	# 注意：保留上面熔炼得到的精华（essences[0].affix == target_affix）供下方锻打测试
 	var wpn = GameState.equipment.weapon

@@ -92,6 +92,57 @@ const HERO_H := 52
 
 const OUTLINE := Color("#141828")     # 轮廓（冷色深）
 
+static func _is_void_or_edge(src: Image, x: int, y: int, outline: Color) -> bool:
+	if x < 0 or y < 0 or x >= src.get_width() or y >= src.get_height():
+		return true
+	var c = src.get_pixel(x, y)
+	return c.a < 0.5 or c.is_equal_approx(outline)
+
+## 环形最短路径 hue 偏移（避免线性插值绕错半圈把红变绿）
+static func _hue_toward(h: float, target: float, step: float) -> float:
+	var diff = target - h
+	if diff > 0.5: diff -= 1.0
+	elif diff < -0.5: diff += 1.0
+	return fposmod(h + clampf(diff, -step, step), 1.0)
+
+## 受光色：提亮 + 降饱和 + 色相微偏暖黄（专业像素的冷暗暖亮配色法）
+static func _hi(c: Color, amt: float = 0.24) -> Color:
+	if c.a < 0.5:
+		return c
+	var v = clampf(c.v + amt * 0.85, 0.0, 1.0)
+	var s = clampf(c.s - amt * 0.30, 0.0, 1.0)
+	var h = _hue_toward(c.h, 0.13, amt * 0.10) if c.s > 0.04 else c.h
+	return Color.from_hsv(h, s, v, c.a)
+
+## 背光色：压暗 + 升饱和 + 色相微偏冷紫
+static func _sh(c: Color, amt: float = 0.22) -> Color:
+	if c.a < 0.5:
+		return c
+	var v = clampf(c.v - amt * 0.95, 0.0, 1.0)
+	var s = clampf(c.s + amt * 0.22, 0.0, 1.0)
+	var h = _hue_toward(c.h, 0.66, amt * 0.12) if c.s > 0.04 else c.h
+	return Color.from_hsv(h, s, v, c.a)
+
+## 细节强化后处理：统一左上方向光（冷暗暖亮 hue-shift）——
+## 受光边缘提亮偏暖、背光边缘压暗偏冷，让每个程序化精灵都有体积感与勾勒感
+## （在描边之后逐帧调用）
+static func _enrich_detail(img: Image, outline: Color = OUTLINE) -> void:
+	var w = img.get_width()
+	var h = img.get_height()
+	var src = img.duplicate()
+	for y in range(h):
+		for x in range(w):
+			var c = src.get_pixel(x, y)
+			if c.a < 0.5 or c.is_equal_approx(outline):
+				continue
+			var lit = _is_void_or_edge(src, x, y - 1, outline) or _is_void_or_edge(src, x - 1, y, outline)
+			var shade = _is_void_or_edge(src, x, y + 1, outline) or _is_void_or_edge(src, x + 1, y, outline)
+			# 保色阴影：仅调明度（不改色相），受光边提亮、背光边压暗 → 既有体积感又保留原色
+			if lit and not shade:
+				img.set_pixel(x, y, _light(c, 0.22))
+			elif shade and not lit:
+				img.set_pixel(x, y, _dark(c, 0.80))
+
 static func hero_frame_size() -> Vector2:
 	return Vector2(HERO_W, HERO_H)
 
@@ -607,6 +658,7 @@ static func enemy_texture(sprite_key: String, palette: Dictionary) -> ImageTextu
 		var frame = _img(size.x, size.y)
 		_draw_enemy(frame, sprite_key, palette, 0, f)
 		_apply_outline(frame, OUTLINE)
+		_enrich_detail(frame)
 		img.blit_rect(frame, Rect2i(0, 0, size.x, size.y), Vector2i(0, f * size.y))
 	var t = _tex(img)
 	_cache[key] = t
@@ -654,13 +706,17 @@ static func _draw_slime(img: Image, oy: int, f: int, p: Color, d: Color, e: Colo
 		_px(img, lx, top + yy, d)
 		_px(img, lx + rw - 1, top + yy, d)
 	_hline(img, x0 + 1, top + h - 1, w - 2, d)
-	# 高光
-	_rect(img, 8, top + 2, 2, 2, _light(p, 0.55))
-	_px(img, 10, top + 2, _light(p, 0.55))
-	# 眼睛与嘴
+	# 高光（玻璃质感：一大块柔光 + 一点高光点）
+	_rect(img, 8, top + 2, 3, 2, _light(p, 0.5))
+	_px(img, 9, top + 1, _light(p, 0.75))
+	_px(img, 8, top + 3, _light(p, 0.35))
+	# 眼睛与嘴（带瞳点反光）
 	_rect(img, 9, top + 6, 2, 2, e)
 	_rect(img, 14, top + 6, 2, 2, e)
+	_px(img, 9, top + 6, _light(e, 0.6)); _px(img, 14, top + 6, _light(e, 0.6))
+	_px(img, 10, top + 7, d); _px(img, 15, top + 7, d)   # 瞳
 	_hline(img, 11, top + 9, 3, d)
+	_px(img, 11, top + 10, _dark(p, 0.85))               # 下唇阴影
 	# 体内悬浮物 / 熔岩裂纹
 	if lava:
 		_hline(img, 7, top + 8, 3, e)
@@ -687,22 +743,29 @@ static func _draw_wolf(img: Image, oy: int, f: int, p: Color, d: Color, e: Color
 	# 头（朝左）
 	_rect(img, 2, by - 3, 6, 5, p)
 	_rect(img, 0, by - 1, 3, 2, p)            # 吻部
-	_px(img, 0, by - 1, d)                     # 鼻
-	_px(img, 3, by - 2, e)                     # 眼
-	_px(img, 3, by - 4, d)                     # 耳
-	_px(img, 6, by - 4, d)
-	_hline(img, 1, by + 1, 2, _dark(p, 0.5))   # 咧嘴
-	# 尾巴
+	_px(img, 0, by - 1, Color("#1b1b22"))      # 黑鼻头
+	_px(img, 3, by - 2, Color("#ffd23a"))      # 凶光金眼
+	_px(img, 4, by - 2, _dark(Color("#ffd23a"), 0.6))
+	# 竖耳（尖立，内耳暗）
+	_px(img, 3, by - 5, p); _px(img, 3, by - 4, p); _px(img, 3, by - 4, _dark(d, 0.6))
+	_px(img, 6, by - 5, p); _px(img, 6, by - 4, p); _px(img, 6, by - 4, _dark(d, 0.6))
+	# 咧嘴獠牙
+	_hline(img, 1, by + 1, 3, _dark(p, 0.45))
+	_px(img, 1, by + 2, Color("#f4f0e4")); _px(img, 3, by + 2, Color("#f4f0e4"))
+	# 背部鬃毛尖（更利落）
+	for i in range(4):
+		_px(img, 8 + i * 3, by - 2, _dark(p, 0.7))
+	# 尾巴（蓬起带尖）
 	if f == 0:
 		_rect(img, 21, by - 2, 4, 2, d)
-		_px(img, 24, by - 3, d)
+		_px(img, 24, by - 3, d); _px(img, 25, by - 4, _dark(d, 0.7))
 	else:
-		_rect(img, 21, by, 4, 2, d)
-	# 四肢
+		_rect(img, 21, by, 4, 2, d); _px(img, 25, by - 1, _dark(d, 0.7))
+	# 四肢 + 爪
 	var ly = by + 6
 	for lx in [7, 11, 15, 19]:
 		_rect(img, lx, ly, 2, 5 - bob, d)
-		_px(img, lx, ly + 4 - bob, _dark(d, 0.7))
+		_px(img, lx, ly + 4 - bob, Color("#e7e2d2"))   # 爪尖
 
 static func _draw_scorpion(img: Image, oy: int, f: int, p: Color, d: Color, e: Color) -> void:
 	var by = oy + 9
@@ -711,21 +774,27 @@ static func _draw_scorpion(img: Image, oy: int, f: int, p: Color, d: Color, e: C
 	_rect(img, 13, by + 1, 5, 4, _dark(p, 0.85))
 	_rect(img, 17, by + 2, 4, 3, _dark(p, 0.75))
 	_hline(img, 8, by, 6, _light(p, 0.25))
-	# 头与眼
+	# 甲壳分节高光（金属反光脊）
+	_px(img, 9, by + 1, _light(p, 0.5)); _px(img, 14, by + 2, _light(p, 0.45)); _px(img, 18, by + 3, _light(p, 0.4))
+	# 头与眼（一对凶红复眼）
 	_rect(img, 5, by + 1, 4, 4, p)
-	_px(img, 6, by + 2, e)
-	# 双螯
+	_px(img, 6, by + 2, Color("#ff5a4a")); _px(img, 7, by + 3, Color("#ff5a4a"))
+	# 双螯（带利钳尖）
 	var open = f == 1
 	_rect(img, 2, by - 1, 3, 2, d)
 	_rect(img, 1, by + (0 if open else 1), 2, 2, p)
+	_px(img, 0, by + (0 if open else 1), _dark(d, 0.7))
 	_rect(img, 2, by + 4, 3, 2, d)
 	_rect(img, 1, by + (5 if open else 4), 2, 2, p)
-	# 尾节上弯 + 毒针
+	_px(img, 0, by + (5 if open else 4), _dark(d, 0.7))
+	# 尾节上弯 + 毒针 + 毒液滴
 	var tx = 20
 	var ty0 = by + 1 - f
 	_px(img, tx, ty0, d); _px(img, tx + 1, ty0 - 1, d)
 	_px(img, tx + 2, ty0 - 2, p); _px(img, tx + 2, ty0 - 3, p)
-	_px(img, tx + 1, ty0 - 4, e)               # 毒针尖
+	_px(img, tx + 1, ty0 - 4, _light(p, 0.4))  # 针根
+	_px(img, tx + 1, ty0 - 5, Color("#1b1b22")) # 针尖
+	_px(img, tx + 2, ty0 - 3, Color("#9bffa0")) # 滴落毒液
 	# 足
 	for i in range(3):
 		_px(img, 9 + i * 3, by + 5, d)
@@ -754,26 +823,36 @@ static func _draw_ghost(img: Image, oy: int, f: int, p: Color, d: Color, e: Colo
 		_rect(img, 9, by + 4, 4, 5, _light(e, 0.2))   # 焰心
 		_px(img, 10, by + 2 - f, e)                    # 火苗
 		_px(img, 12, by + 1 + f, e)
+		_px(img, 11, by + 3, _light(e, 0.6))           # 焰心高光
 	else:
 		_rect(img, 10, by + 7, 2, 2, e)                # 胸核
-	_rect(img, 8, by + 4, 2, 2, d if not flame else Color("#2a1408"))
-	_rect(img, 13, by + 4, 2, 2, d if not flame else Color("#2a1408"))
+		_px(img, 10, by + 7, _light(e, 0.6))
+	# 空洞鬼眼（深陷 + 内里幽光）
+	var socket = Color("#120a1e") if not flame else Color("#2a1408")
+	var glowcol = _light(e, 0.5) if not flame else Color("#ffd089")
+	_rect(img, 8, by + 4, 2, 3, socket)
+	_rect(img, 13, by + 4, 2, 3, socket)
+	_px(img, 8, by + 5, glowcol); _px(img, 14, by + 5, glowcol)
 
 static func _draw_construct(img: Image, oy: int, f: int, p: Color, d: Color, e: Color) -> void:
 	var by = oy + 4 + f
-	# 浮空头块
+	# 浮空头块（发光单眼）
 	_rect(img, 9, by - 4, 8, 4, p)
 	_hline(img, 9, by - 4, 8, _light(p, 0.3))
-	_rect(img, 11, by - 3, 2, 2, e)
-	_rect(img, 14, by - 3, 1, 2, e)
+	_rect(img, 11, by - 3, 4, 2, _dark(p, 0.5))
+	_rect(img, 12, by - 3, 2, 2, e)
+	_px(img, 12, by - 3, _light(e, 0.6))
 	# 躯干石块
 	_rect(img, 7, by + 1, 12, 9, p)
 	_vline(img, 7, by + 1, 9, d)
 	_vline(img, 18, by + 1, 9, d)
 	_hline(img, 7, by + 9, 12, d)
-	# 胸口符文
-	_px(img, 12, by + 3, e); _px(img, 13, by + 4, e)
-	_px(img, 12, by + 5, e); _px(img, 11, by + 4, e)
+	# 石砌接缝（方块感）
+	_hline(img, 8, by + 4, 10, _dark(p, 0.78))
+	_vline(img, 12, by + 1, 9, _dark(p, 0.8))
+	# 胸口符文（菱形脉动核）
+	_px(img, 12, by + 3, _light(e, 0.5)); _px(img, 13, by + 4, e)
+	_px(img, 12, by + 5, _light(e, 0.5)); _px(img, 11, by + 4, e); _px(img, 12, by + 4, _light(e, 0.7))
 	# 悬浮肩臂
 	_rect(img, 3, by + 2 - f, 3, 5, _dark(p, 0.85))
 	_rect(img, 20, by + 2 + f, 3, 5, _dark(p, 0.85))
@@ -786,18 +865,26 @@ static func _draw_construct(img: Image, oy: int, f: int, p: Color, d: Color, e: 
 
 static func _draw_yeti(img: Image, oy: int, f: int, p: Color, d: Color, e: Color) -> void:
 	var by = oy + 3 + f
+	# 一对弯角（兽王威压）
+	_px(img, 6, by + 1, Color("#e7ddc4")); _px(img, 5, by, Color("#e7ddc4")); _px(img, 5, by - 1, Color("#cdbf9e"))
+	_px(img, 19, by + 1, Color("#e7ddc4")); _px(img, 20, by, Color("#e7ddc4")); _px(img, 20, by - 1, Color("#cdbf9e"))
 	# 大块毛躯
 	_rect(img, 6, by + 3, 14, 13, p)
 	_hline(img, 6, by + 3, 14, _light(p, 0.3))
-	# 毛发纹理
+	# 毛发纹理（交错短簇）
 	for yy in range(4, 15, 3):
 		for xx in range(7, 19, 4):
 			_px(img, xx + (yy % 2), by + yy, d)
-	# 脸部凹陷
+			_px(img, xx + (yy % 2), by + yy - 1, _light(p, 0.25))
+	# 脸部凹陷 + 浓眉
 	_rect(img, 9, by + 4, 8, 5, d)
-	_rect(img, 10, by + 5, 2, 2, e)
-	_rect(img, 14, by + 5, 2, 2, e)
+	_hline(img, 9, by + 4, 8, _dark(d, 0.5))        # 怒眉
+	_rect(img, 10, by + 5, 2, 2, Color("#7ad9ff"))  # 冰蓝眼
+	_rect(img, 14, by + 5, 2, 2, Color("#7ad9ff"))
+	_px(img, 10, by + 5, _light(Color("#7ad9ff"), 0.5)); _px(img, 14, by + 5, _light(Color("#7ad9ff"), 0.5))
+	# 咧口獠牙
 	_hline(img, 11, by + 8, 4, _dark(d, 0.6))
+	_px(img, 11, by + 8, Color("#f4f0e4")); _px(img, 14, by + 8, Color("#f4f0e4"))
 	# 长臂
 	_rect(img, 3, by + 5, 3, 9 + f, p)
 	_rect(img, 20, by + 5, 3, 9 - f, p)
@@ -880,6 +967,7 @@ static func boss_texture(region: int, palette: Dictionary) -> ImageTexture:
 		var frame = _img(30, 30)
 		_draw_boss(frame, region, palette, 0, f)
 		_apply_outline(frame, OUTLINE)
+		_enrich_detail(frame)
 		img.blit_rect(frame, Rect2i(0, 0, 30, 30), Vector2i(0, f * 30))
 	var t = _tex(img)
 	_cache[key] = t
@@ -1057,6 +1145,7 @@ static func cycle_boss_texture(sprite_key: String, palette: Dictionary) -> Image
 		var frame = _img(sz.x, sz.y)
 		_draw_cycle_boss(frame, sprite_key, palette, 0, f)
 		_apply_outline(frame, OUTLINE)
+		_enrich_detail(frame)
 		img.blit_rect(frame, Rect2i(0, 0, sz.x, sz.y), Vector2i(0, f * sz.y))
 	var t = _tex(img)
 	_cache[key] = t
@@ -1083,6 +1172,11 @@ static func _draw_cb_orochi(img: Image, oy: int, f: int, p: Color, d: Color, e: 
 	_hline(img, 11, oy + 46, 26, d)
 	for i in range(7):
 		_px(img, 12 + i * 4, oy + 38 + (i % 2), _dark(p, 0.6))
+	# 盘身鳞甲高光脊线 + 腹甲横纹（细化）
+	for yy in range(32, 46, 2):
+		_px(img, 24, oy + yy, _light(p, 0.4))
+	for yy in range(40, 47):
+		_hline(img, 21, oy + yy, 6, _light(p, 0.18) if yy % 2 == 0 else _dark(p, 0.7))
 	# 五条蛇颈（八岐之首）
 	var necks = [[9, 17, -1], [16, 25, 1], [24, 30, 0], [32, 25, 1], [39, 17, -1]]
 	for n in necks:
@@ -1105,7 +1199,12 @@ static func _draw_cb_orochi(img: Image, oy: int, f: int, p: Color, d: Color, e: 
 		_hline(img, hx - 2, hy - 3, 6, _light(p, 0.25))
 		_px(img, hx - 1, hy - 1, e)
 		_px(img, hx + 3, hy - 1, e)
+		_px(img, hx - 1, hy - 1, _light(e, 0.6))
 		_hline(img, hx - 1, hy + 1, 4, a)
+		# 信子（红色分叉吐舌）+ 角脊
+		_px(img, hx + 1, hy + 2, Color("#e0556a"))
+		_px(img, hx, hy + 3, Color("#e0556a")); _px(img, hx + 2, hy + 3, Color("#e0556a"))
+		_px(img, hx - 2, hy - 4, _light(p, 0.3)); _px(img, hx + 3, hy - 4, _light(p, 0.3))
 
 static func _draw_cb_kitsune(img: Image, oy: int, f: int, p: Color, d: Color, e: Color, a: Color) -> void:
 	var sway = 1 if f == 1 else 0
@@ -1141,14 +1240,21 @@ static func _draw_cb_kitsune(img: Image, oy: int, f: int, p: Color, d: Color, e:
 		_hline(img, 18, oy + 12 + r, r + 1, p)
 		_hline(img, 29 - r, oy + 12 + r, r + 1, p)
 	_px(img, 19, oy + 16, a); _px(img, 28, oy + 16, a)
+	# 内耳粉 + 额心火纹（细化）
+	_px(img, 20, oy + 15, Color("#ff9bb0")); _px(img, 27, oy + 15, Color("#ff9bb0"))
+	_px(img, 23, oy + 19, _light(e, 0.5)); _px(img, 24, oy + 20, _light(e, 0.5))
 	# 尖白吻
 	_rect(img, 21, oy + 25, 6, 4, _light(e, 0.45))
 	_rect(img, 22, oy + 28, 4, 2, _light(e, 0.45))
 	_px(img, 23, oy + 29, d); _px(img, 24, oy + 29, d)
-	# 狐眼（金色细长，带描边）
+	_px(img, 23, oy + 27, Color("#3a2630")); _px(img, 24, oy + 27, Color("#3a2630"))   # 鼻头
+	# 狐眼（金色细长，带描边 + 高光）
 	_px(img, 20, oy + 22, e); _px(img, 21, oy + 22, e)
 	_px(img, 27, oy + 22, e); _px(img, 26, oy + 22, e)
+	_px(img, 20, oy + 22, _light(e, 0.6)); _px(img, 27, oy + 22, _light(e, 0.6))
 	_px(img, 20, oy + 23, d); _px(img, 27, oy + 23, d)
+	# 颊侧白毛簇
+	_px(img, 17, oy + 24, _light(e, 0.4)); _px(img, 30, oy + 24, _light(e, 0.4))
 	# 前爪
 	_rect(img, 19, oy + 42, 3, 4, _light(e, 0.3))
 	_rect(img, 26, oy + 42, 3, 4, _light(e, 0.3))
@@ -1167,6 +1273,10 @@ static func _draw_cb_colossus(img: Image, oy: int, f: int, p: Color, d: Color, e
 	# 胸口符文（脉动）
 	_rect(img, 21, by + 20, 6, 6, _dark(p, 0.5))
 	_px(img, 23, by + 22, glow); _px(img, 24, by + 23, glow); _px(img, 23, by + 24, glow)
+	# 躯体发光裂纹（细化：能量从符文向外延伸）
+	_px(img, 20, by + 18, glow); _px(img, 19, by + 16, _dark(glow, 0.8))
+	_px(img, 28, by + 23, glow); _px(img, 30, by + 26, _dark(glow, 0.8))
+	_px(img, 24, by + 28, glow); _px(img, 24, by + 31, _dark(glow, 0.8))
 	# 三头：中央高、两侧低
 	_rect(img, 19, by - 4, 10, 10, p)
 	_hline(img, 19, by - 4, 10, _light(p, 0.2))
@@ -1201,6 +1311,9 @@ static func _draw_cb_voidbeast(img: Image, oy: int, f: int, p: Color, d: Color, 
 	_rect(img, cx - 4, cy - 4, 8, 8, _dark(p, 0.4))
 	_rect(img, cx - 2, cy - 2, 4, 4, core)
 	_px(img, cx, cy, _light(core, 0.5))
+	# 体内星屑（细化：核团内漂浮的微光点）
+	_px(img, cx - 7, cy + 2, _light(core, 0.6)); _px(img, cx + 6, cy - 5, _light(core, 0.6))
+	_px(img, cx + 4, cy + 6, e); _px(img, cx - 5, cy - 6, e); _px(img, cx + 8, cy + 1, _light(core, 0.4))
 	# 多眼
 	var eyes = [[16, oy + 14], [32, oy + 15], [18, oy + 28], [30, oy + 27], [24, oy + 10]]
 	for ey in eyes:
@@ -1230,178 +1343,227 @@ static func item_icon(item: Dictionary) -> ImageTexture:
 	var key = "icon|%s|%s" % [fam, elem]
 	if _cache.has(key):
 		return _cache[key]
-	var img = _img(14, 14)
+	var img = _img(20, 20)
 	var pal = ELEM_PAL.get(elem, ELEM_PAL[""])
 	var pc: Color = _c(pal.p)
 	var dc: Color = _c(pal.d)
 	_draw_icon(img, fam, pc, dc)
 	_apply_outline(img, OUTLINE)
+	_enrich_detail(img)        # 冷暗暖亮立体光影
+	_icon_glint(img)           # 金属高光点，让图标更有质感不死板
 	var t = _tex(img)
 	_cache[key] = t
 	return t
 
+## 在图标最上方的受光像素上点一抹近白高光，营造金属/宝石反光
+static func _icon_glint(img: Image) -> void:
+	var w = img.get_width()
+	var h = img.get_height()
+	for y in range(h):
+		for x in range(w):
+			var c = img.get_pixel(x, y)
+			if c.a > 0.5 and not c.is_equal_approx(OUTLINE) and c.v > 0.35:
+				img.set_pixel(x, y, c.lerp(Color.WHITE, 0.6))
+				if x + 1 < w:
+					var c2 = img.get_pixel(x + 1, y)
+					if c2.a > 0.5 and not c2.is_equal_approx(OUTLINE):
+						img.set_pixel(x + 1, y, c2.lerp(Color.WHITE, 0.3))
+				return
+
+## 20×20 装备图标：统一左上光源三调（受光/本体/背光）+ 锋刃高光 + 元素染色护手/宝石
 static func _draw_icon(img: Image, fam: String, pc: Color, dc: Color) -> void:
-	var steel = Color("#cfd6e4").lerp(pc, 0.4)
+	var steel = Color("#c6cedd").lerp(pc, 0.42)
+	var steel_hi = _light(steel, 0.55)
+	var steel_dk = _dark(steel, 0.58)
+	var edge = _light(steel, 0.9)
 	var grip = Color("#6e4a2a")
+	var grip_hi = _light(grip, 0.35)
+	var grip_dk = _dark(grip, 0.62)
+	var gold = Color("#e8c45a").lerp(pc, 0.25)
+	var gold_hi = _light(gold, 0.5)
+	var gold_dk = _dark(gold, 0.7)
+	var gem = _light(pc, 0.2)
+	var gem_hi = _light(pc, 0.7)
+	var pcl = _light(pc, 0.38)
+	var pdk = _dark(pc, 0.66)
 	match fam:
 		"短剑", "长剑", "刺剑", "巨剑":
-			var l = { "短剑": 6, "长剑": 9, "刺剑": 10, "巨剑": 10 }.get(fam, 8)
-			var wide = fam == "巨剑"
-			for i in range(l):
-				_px(img, 11 - i, 2 + i, steel)
-				if wide:
-					_px(img, 12 - i, 2 + i, _dark(steel, 0.75))
-			_px(img, 11, 2, _light(steel, 0.5))
-			_px(img, 12 - l, 3 + l - 1, dc)     # 护手
-			_px(img, 13 - l, 2 + l, dc)
-			_px(img, 11 - l, 4 + l - 1, grip)
-			_px(img, 10 - l + (1 if l > 8 else 0), 5 + l - 1 - (1 if l > 8 else 0), grip)
+			var top_y: int = { "短剑": 7, "长剑": 3, "刺剑": 3, "巨剑": 4 }.get(fam, 4)
+			var half: int = 2 if fam == "巨剑" else (0 if fam == "刺剑" else 1)
+			var cx = 10
+			for y in range(top_y, 14):
+				_hline(img, cx - half, y, half * 2 + 1, steel)
+				_px(img, cx - half, y, edge)             # 左缘锋刃
+				_px(img, cx + half, y, steel_dk)         # 右缘背光
+				if half > 0:
+					_px(img, cx, y, steel_hi)            # 中线血槽提亮
+			_px(img, cx, top_y - 1, edge)                # 剑尖
+			if half == 2:
+				_px(img, cx - 1, top_y, edge); _px(img, cx + 1, top_y, steel_dk)
+			_hline(img, cx - 4, 14, 9, gold)             # 护手（元素金）
+			_hline(img, cx - 4, 15, 9, gold_dk)
+			_px(img, cx - 4, 14, gold_hi)
+			_rect(img, cx - 1, 16, 2, 2, grip); _px(img, cx - 1, 16, grip_hi)  # 握柄
+			_rect(img, cx - 1, 18, 2, 1, gem); _px(img, cx, 18, gem_hi)        # 柄首宝石
 		"手斧", "战斧", "巨斧":
-			for i in range(8):
-				_px(img, 4 + i, 11 - i, grip)
-			_rect(img, 9, 1, 4, 4, steel)
-			_px(img, 12, 1, _light(steel, 0.5))
-			_px(img, 9, 4, dc)
+			_rect(img, 9, 3, 2, 16, grip)                # 竖直木柄
+			_vline(img, 9, 3, 16, grip_hi); _vline(img, 10, 3, 16, grip_dk)
+			var hy = 4
+			var hh: int = 7 if fam == "手斧" else 10
+			for y in range(hy, hy + hh):                 # 右刃月牙
+				var t = float(y - hy) / float(hh - 1)
+				var w = int(round(sin(t * PI) * 4.5)) + 2
+				_hline(img, 11, y, w, steel)
+				_px(img, 11 + w - 1, y, edge); _px(img, 11, y, steel_dk)
 			if fam == "巨斧":
-				_rect(img, 5, 1, 3, 4, _dark(steel, 0.8))
-			if fam == "手斧":
-				_rect(img, 9, 1, 3, 3, steel)
+				for y in range(hy, hy + hh):             # 双刃斧左刃
+					var t2 = float(y - hy) / float(hh - 1)
+					var w2 = int(round(sin(t2 * PI) * 3.5)) + 2
+					_hline(img, 9 - w2, y, w2, steel)
+					_px(img, 9 - w2, y, edge)
+			_rect(img, 9, 2, 2, 1, gem); _px(img, 9, 2, gem_hi)   # 顶端宝石
 		"猎弓", "长弓", "劲弩":
 			if fam == "劲弩":
-				_hline(img, 2, 7, 9, grip)
-				_vline(img, 4, 3, 9, steel)
-				_px(img, 3, 3, dc); _px(img, 3, 11, dc)
-				_px(img, 11, 7, _light(steel, 0.6))
+				_hline(img, 4, 10, 12, grip); _hline(img, 4, 11, 12, grip_dk)
+				_px(img, 4, 10, grip_hi)
+				_vline(img, 14, 5, 11, steel)            # 弓臂
+				_px(img, 14, 5, edge); _px(img, 14, 15, edge)
+				_hline(img, 6, 9, 9, steel_hi)           # 弩箭
+				_px(img, 15, 9, edge); _px(img, 14, 8, steel); _px(img, 14, 10, steel)
+				_px(img, 5, 9, gem)
 			else:
-				for i in range(10):
-					var off = 2 if (i > 2 and i < 7) else (1 if (i > 0 and i < 9) else 0)
-					_px(img, 8 + off, 2 + i, dc if i % 3 == 0 else grip)
-				_vline(img, 8, 2, 10, Color(1, 1, 1, 0.5))
-				_hline(img, 4, 7, 5, steel)
-				_px(img, 3, 7, _light(steel, 0.6))
+				var span: int = 15 if fam == "长弓" else 12
+				var y0: int = 3 if fam == "长弓" else 4
+				for k in range(span):                    # 弓臂左凸弧
+					var t = float(k) / float(span - 1)
+					var bx = 12 - int(round(sin(t * PI) * 7.0))
+					_px(img, bx, y0 + k, grip)
+					_px(img, bx - 1, y0 + k, grip_dk)
+					if k % 4 == 0:
+						_px(img, bx, y0 + k, grip_hi)
+				_vline(img, 13, y0, span, Color(1, 1, 1, 0.5))   # 弓弦
+				var my = y0 + span / 2
+				_hline(img, 5, my, 11, steel_hi)         # 搭箭
+				_px(img, 16, my, edge); _px(img, 15, my - 1, steel); _px(img, 15, my + 1, steel)
+				_px(img, 4, my, gem)
 		"布甲", "皮甲", "锁子甲", "板甲", "龙鳞甲":
-			# 躯干轮廓
-			_rect(img, 4, 3, 6, 8, pc)
-			_rect(img, 2, 3, 2, 4, pc)
-			_rect(img, 10, 3, 2, 4, pc)
-			_vline(img, 4, 3, 8, dc)
-			_vline(img, 9, 3, 8, dc)
-			_hline(img, 4, 10, 6, dc)
+			_rect(img, 6, 5, 8, 9, pc)                   # 胸甲
+			_rect(img, 4, 5, 3, 4, pc); _rect(img, 13, 5, 3, 4, pc)   # 双肩
+			_hline(img, 6, 5, 8, pcl); _vline(img, 6, 5, 9, pcl)
+			_vline(img, 13, 5, 9, pdk); _hline(img, 6, 13, 8, pdk)
+			_rect(img, 9, 5, 2, 2, dc)                   # 领口
 			match fam:
 				"皮甲":
-					_hline(img, 4, 7, 6, dc)
-					_px(img, 6, 7, Color("#e8c95a"))
+					_hline(img, 6, 9, 8, dc); _px(img, 9, 9, gold)
 				"锁子甲":
-					for yy in range(4, 10):
-						for xx in range(5, 9):
+					for yy in range(7, 13):
+						for xx in range(7, 13):
 							if (xx + yy) % 2 == 0:
-								_px(img, xx, yy, dc)
+								_px(img, xx, yy, _dark(pc, 0.78))
 				"板甲":
-					_vline(img, 6, 4, 6, _light(pc, 0.4))
-					_hline(img, 2, 3, 3, _light(pc, 0.4))
-					_hline(img, 9, 3, 3, _light(pc, 0.4))
+					_vline(img, 10, 6, 7, _light(pc, 0.5))
+					_hline(img, 4, 5, 3, _light(pc, 0.5)); _hline(img, 13, 5, 3, _light(pc, 0.5))
+					_hline(img, 7, 9, 6, pdk)
 				"龙鳞甲":
-					for yy in range(4, 10, 2):
-						for xx in range(5, 9, 2):
-							_px(img, xx + (yy >> 1) % 2, yy, _light(pc, 0.35))
-					_px(img, 3, 2, dc); _px(img, 10, 2, dc)
+					for yy in range(6, 13, 2):
+						for xx in range(6, 14, 2):
+							_px(img, xx + ((yy >> 1) & 1), yy, _light(pc, 0.4))
+					_px(img, 4, 5, dc); _px(img, 15, 5, dc)
+				"布甲":
+					_hline(img, 7, 8, 6, pdk); _hline(img, 7, 11, 6, pdk)
 		"皮帽", "铁盔", "战盔", "骑士盔", "龙首盔":
-			# 头盔轮廓：穹顶 + 帽檐
-			_rect(img, 4, 4, 6, 4, pc)
-			_hline(img, 5, 3, 4, pc)
-			_px(img, 5, 3, _light(pc, 0.4))
-			_hline(img, 3, 8, 8, dc)                       # 帽檐
+			_rect(img, 6, 5, 8, 6, pc); _hline(img, 7, 4, 6, pc)   # 穹顶
+			_hline(img, 6, 5, 8, pcl); _vline(img, 6, 5, 6, pcl); _vline(img, 13, 5, 6, pdk)
+			_hline(img, 5, 11, 10, dc)                   # 帽檐
 			match fam:
+				"皮帽":
+					_hline(img, 6, 8, 8, dc)
 				"铁盔":
-					_px(img, 7, 2, dc)                      # 顶钉
+					_rect(img, 9, 3, 2, 2, steel); _px(img, 9, 3, edge)   # 顶钉
 				"战盔":
-					_vline(img, 4, 9, 3, pc)                # 护颊
-					_vline(img, 9, 9, 3, pc)
+					_vline(img, 6, 11, 3, pc); _vline(img, 13, 11, 3, pc) # 护颊
+					_hline(img, 8, 9, 4, dc)
 				"骑士盔":
-					_vline(img, 4, 9, 3, pc)
-					_vline(img, 9, 9, 3, pc)
-					_hline(img, 5, 10, 4, dc)               # 面甲缝
-					_rect(img, 6, 1, 2, 2, _light(pc, 0.5)) # 盔缨
+					_vline(img, 6, 11, 4, pc); _vline(img, 13, 11, 4, pc)
+					_hline(img, 8, 9, 4, dc)             # 面甲缝
+					_rect(img, 9, 2, 2, 3, Color("#d8434a")); _px(img, 9, 2, Color("#f08088"))  # 红盔缨
 				"龙首盔":
-					_px(img, 3, 3, dc); _px(img, 2, 2, dc)  # 双角
-					_px(img, 10, 3, dc); _px(img, 11, 2, dc)
-					_vline(img, 4, 9, 3, pc)
-					_vline(img, 9, 9, 3, pc)
+					_px(img, 5, 4, dc); _px(img, 4, 3, dc); _px(img, 4, 2, dc)     # 双角
+					_px(img, 14, 4, dc); _px(img, 15, 3, dc); _px(img, 15, 2, dc)
+					_vline(img, 6, 11, 3, pc); _vline(img, 13, 11, 3, pc)
+					_rect(img, 9, 7, 2, 2, gem); _px(img, 9, 7, gem_hi)            # 额宝石
 		"布裤", "皮裤", "链甲裤", "板甲腿铠", "龙鳞腿甲":
-			# 裤子轮廓：腰 + 两条裤腿
-			_rect(img, 4, 3, 6, 3, pc)
-			_hline(img, 4, 3, 6, _light(pc, 0.3))
-			_rect(img, 4, 6, 2, 6, pc)
-			_rect(img, 8, 6, 2, 6, pc)
-			_vline(img, 5, 6, 6, dc)
-			_vline(img, 9, 6, 6, dc)
+			_rect(img, 6, 4, 8, 4, pc); _hline(img, 6, 4, 8, pcl)   # 腰
+			_rect(img, 6, 8, 3, 8, pc); _rect(img, 11, 8, 3, 8, pc) # 双腿
+			_vline(img, 6, 8, 8, pcl); _vline(img, 13, 8, 8, pdk); _vline(img, 9, 8, 8, dc)
 			match fam:
 				"皮裤":
-					_hline(img, 4, 5, 6, dc)
+					_hline(img, 6, 7, 8, dc)
 				"链甲裤":
-					for yy in range(6, 12, 2):
-						_px(img, 4, yy, dc)
-						_px(img, 8, yy + 1, dc)
+					for yy in range(8, 16, 2):
+						_px(img, 7, yy, dc); _px(img, 12, yy + 1, dc)
 				"板甲腿铠":
-					_px(img, 4, 8, _light(pc, 0.45))        # 膝甲
-					_px(img, 8, 8, _light(pc, 0.45))
+					_rect(img, 6, 9, 3, 2, _light(pc, 0.5)); _rect(img, 11, 9, 3, 2, _light(pc, 0.5))
 				"龙鳞腿甲":
-					for yy in range(6, 12, 2):
-						_px(img, 4, yy, _light(pc, 0.35))
-						_px(img, 8, yy, _light(pc, 0.35))
+					for yy in range(8, 16, 2):
+						_px(img, 7, yy, _light(pc, 0.4)); _px(img, 12, yy, _light(pc, 0.4))
+				"布裤":
+					_hline(img, 6, 12, 3, pdk); _hline(img, 11, 12, 3, pdk)
 		"草编鞋", "皮靴", "铁头靴", "疾风靴", "龙行靴":
-			# 鞋（侧视）：靴筒 + 鞋头
-			_rect(img, 4, 4, 3, 6, pc)
-			_rect(img, 4, 9, 7, 3, pc)
-			_hline(img, 4, 11, 7, dc)                       # 鞋底
-			_px(img, 5, 4, _light(pc, 0.3))
-			_px(img, 10, 9, _light(pc, 0.2))                # 鞋尖
+			_rect(img, 6, 5, 4, 9, pc)                   # 靴筒
+			_rect(img, 6, 13, 9, 3, pc)                  # 鞋身
+			_hline(img, 6, 16, 10, dc)                   # 鞋底
+			_vline(img, 6, 5, 9, pcl); _hline(img, 6, 5, 4, pcl); _px(img, 14, 13, pcl)
 			match fam:
 				"草编鞋":
-					for yy in range(5, 10, 2):
-						_px(img, 5, yy, dc)
+					for yy in range(6, 13, 2):
+						_hline(img, 6, yy, 4, dc)
 				"皮靴":
-					_hline(img, 4, 7, 3, dc)                # 靴口束带
+					_hline(img, 6, 9, 4, dc)
 				"铁头靴":
-					_rect(img, 9, 9, 2, 2, Color("#cfd6e4"))
+					_rect(img, 12, 13, 3, 3, steel); _px(img, 14, 13, edge)
 				"疾风靴":
-					_px(img, 3, 5, _light(pc, 0.6))          # 翼羽
-					_px(img, 2, 4, _light(pc, 0.6))
+					_px(img, 4, 6, _light(pc, 0.7)); _px(img, 3, 5, _light(pc, 0.7)); _px(img, 4, 8, _light(pc, 0.6))
 				"龙行靴":
-					_px(img, 4, 3, dc); _px(img, 6, 3, dc)   # 鳞脊
-					_px(img, 11, 10, dc)                     # 爪尖
+					_px(img, 6, 4, dc); _px(img, 8, 4, dc)
+					_px(img, 15, 15, dc); _px(img, 16, 14, dc)
 		"木刻护符":
-			_vline(img, 6, 2, 3, grip)
-			_rect(img, 4, 5, 5, 6, pc)
-			_px(img, 6, 7, dc); _px(img, 6, 8, dc)
-			_hline(img, 5, 9, 3, dc)
+			_vline(img, 10, 3, 3, grip)                  # 绳
+			_rect(img, 7, 6, 7, 8, pc); _hline(img, 7, 6, 7, pcl)
+			_vline(img, 7, 6, 8, pcl); _vline(img, 13, 6, 8, pdk)
+			_rect(img, 9, 9, 3, 3, dc); _px(img, 10, 10, gem)        # 雕纹
 		"铜纹戒指":
-			for t in range(16):
-				var ang = TAU * t / 16.0
-				_px(img, 7 + roundi(cos(ang) * 4), 7 + roundi(sin(ang) * 4), pc)
-			_px(img, 7, 3, _light(pc, 0.6))
-			_px(img, 7, 2, dc)
+			for t in range(24):
+				var ang = TAU * t / 24.0
+				var rx = 10 + roundi(cos(ang) * 5)
+				var ry = 12 + roundi(sin(ang) * 5)
+				_px(img, rx, ry, pc)
+				if sin(ang) < -0.3 or cos(ang) < -0.3:
+					_px(img, rx, ry, pcl)
+				elif sin(ang) > 0.3:
+					_px(img, rx, ry, pdk)
+			_rect(img, 9, 3, 3, 3, gem); _px(img, 9, 3, gem_hi)      # 宝石
 		"银辉徽章":
-			_rect(img, 4, 3, 6, 6, pc)
-			_px(img, 4, 3, _light(pc, 0.4)); _px(img, 9, 3, _light(pc, 0.4))
-			_px(img, 5, 9, dc); _px(img, 7, 10, dc); _px(img, 8, 9, dc)
-			_rect(img, 6, 5, 2, 2, _light(pc, 0.55))
+			_rect(img, 6, 4, 8, 6, pc)
+			for k in range(4):
+				_hline(img, 7 + k, 10 + k, maxi(1, 6 - 2 * k), pc)   # 盾底收尖
+			_hline(img, 6, 4, 8, pcl); _vline(img, 6, 4, 6, pcl); _vline(img, 13, 4, 6, pdk)
+			_rect(img, 8, 6, 4, 3, _light(pc, 0.55)); _px(img, 9, 7, gem_hi)
 		"秘语契珠":
-			for t in range(20):
-				var ang = TAU * t / 20.0
-				_px(img, 7 + roundi(cos(ang) * 4.4), 7 + roundi(sin(ang) * 4.4), dc)
-			_rect(img, 5, 5, 4, 4, pc)
-			_px(img, 6, 6, _light(pc, 0.6))
-			_px(img, 8, 8, _light(pc, 0.3))
+			for yy in range(-5, 6):                      # 球体
+				var rr = int(round(sqrt(maxf(0.0, 25.0 - yy * yy))))
+				_hline(img, 10 - rr, 10 + yy, rr * 2, pc)
+				_px(img, 10 - rr, 10 + yy, pdk); _px(img, 10 + rr - 1, 10 + yy, pdk)
+			_rect(img, 7, 7, 3, 3, _light(pc, 0.6)); _px(img, 7, 7, gem_hi)   # 高光
+			_px(img, 4, 10, gem); _px(img, 16, 10, gem); _px(img, 10, 4, gem); _px(img, 10, 16, gem)  # 符环
 		"圣辉遗物":
-			_vline(img, 7, 2, 9, pc)
-			_hline(img, 4, 5, 7, pc)
-			_px(img, 7, 2, _light(pc, 0.5))
-			_px(img, 4, 5, dc); _px(img, 10, 5, dc)
-			_rect(img, 6, 11, 3, 2, dc)
+			_vline(img, 9, 3, 13, pc); _vline(img, 10, 3, 13, pcl)   # 十字圣物
+			_hline(img, 5, 8, 11, pc); _hline(img, 5, 9, 11, pdk)
+			_px(img, 9, 3, gem_hi)
+			_rect(img, 8, 13, 3, 3, gold); _px(img, 8, 13, gold_hi)  # 底座
 		_:
-			_rect(img, 4, 4, 6, 6, pc)
-			_px(img, 5, 5, _light(pc, 0.4))
+			_rect(img, 6, 6, 8, 8, pc); _hline(img, 6, 6, 8, pcl)
+			_rect(img, 8, 8, 3, 3, _light(pc, 0.5))
 
 ## 清空缓存（测试用）
 static func clear_cache() -> void:

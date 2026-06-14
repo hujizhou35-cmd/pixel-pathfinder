@@ -248,6 +248,10 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 		sprite.modulate = Color(1.12, 1.04, 0.9, 1.0)
 	root.add_child(sprite)
 
+	# 像素粒子光环：仅精英 / 区域首领 / 周目大 Boss 拥有（普通杂兵无粒子）
+	if e.get("cycle_boss", false) or e.is_boss or e.is_elite:
+		_add_enemy_particles(root, e, w, h)
+
 	# 名称（含元素标记）
 	var name_lbl = Label.new()
 	var elem = str(e.get("element", ""))
@@ -352,6 +356,79 @@ func _make_enemy_slot(e: Dictionary, i: int, n: int) -> Dictionary:
 		"status_lbl": status_lbl,
 		"base_pos": root.position, "ring": ring, "dead": false,
 	}
+
+## 小方块像素贴图（粒子用），按颜色缓存
+static var _pix_cache: Dictionary = {}
+func _pixel_square(col: Color) -> ImageTexture:
+	var key = col.to_html()
+	if _pix_cache.has(key):
+		return _pix_cache[key]
+	var img = Image.create(3, 3, false, Image.FORMAT_RGBA8)
+	img.fill(col)
+	var t = ImageTexture.create_from_image(img)
+	_pix_cache[key] = t
+	return t
+
+## 为敌人添加上升的像素粒子光环；周目大 Boss 更密集并带主题色
+func _add_enemy_particles(root: Control, e: Dictionary, w: float, h: float) -> void:
+	var is_cb: bool = e.get("cycle_boss", false)
+	var pal: Dictionary = e.get("palette", {})
+	var col := Color("#cfd6e4")
+	if is_cb:
+		col = {
+			"orochi": Color("#7be08a"), "kitsune": Color("#ffd36a"),
+			"colossus": Color("#d8c8a4"), "voidbeast": Color("#c08aff"),
+		}.get(str(e.get("cycle_sprite", "voidbeast")), Color("#c08aff"))
+	else:
+		col = Color(str(pal.get("e", "#cfd6e4")))
+	# 主体上升粒子
+	var ps = CPUParticles2D.new()
+	ps.texture = _pixel_square(col)
+	ps.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	ps.amount = 30 if is_cb else (14 if e.is_boss else 7)
+	ps.lifetime = 1.9 if is_cb else 1.5
+	ps.preprocess = ps.lifetime
+	ps.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	ps.emission_rect_extents = Vector2(w * 0.34, h * 0.42)
+	ps.direction = Vector2(0, -1)
+	ps.spread = 28.0
+	ps.gravity = Vector2(0, -26.0)
+	ps.initial_velocity_min = 10.0
+	ps.initial_velocity_max = 30.0 if is_cb else 20.0
+	ps.scale_amount_min = 2.0
+	ps.scale_amount_max = 5.0 if is_cb else 3.5
+	var grad = Gradient.new()
+	grad.set_color(0, Color(col.r, col.g, col.b, 0.0))
+	grad.add_point(0.25, Color(col.r, col.g, col.b, 0.9 if is_cb else 0.6))
+	grad.set_color(1, Color(col.r, col.g, col.b, 0.0))
+	ps.color_ramp = grad
+	ps.position = Vector2(12.0 + w / 2.0, h * 0.55)
+	root.add_child(ps)
+	root.move_child(ps, 1)   # 置于精灵之后（光环在身后）
+	# 周目大 Boss 额外环绕火花（位于身前，营造威压感）
+	if is_cb:
+		var sp = CPUParticles2D.new()
+		sp.texture = _pixel_square(Color(col.r, col.g, col.b).lerp(Color.WHITE, 0.4))
+		sp.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		sp.amount = 16
+		sp.lifetime = 1.3
+		sp.preprocess = 1.3
+		sp.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE_SURFACE
+		sp.emission_sphere_radius = maxf(w, h) * 0.46
+		sp.gravity = Vector2.ZERO
+		sp.orbit_velocity_min = 0.12
+		sp.orbit_velocity_max = 0.22
+		sp.initial_velocity_min = 0.0
+		sp.initial_velocity_max = 4.0
+		sp.scale_amount_min = 2.0
+		sp.scale_amount_max = 4.0
+		var g2 = Gradient.new()
+		g2.set_color(0, Color(1, 1, 1, 0.0))
+		g2.add_point(0.3, Color(col.r, col.g, col.b, 0.95))
+		g2.set_color(1, Color(col.r, col.g, col.b, 0.0))
+		sp.color_ramp = g2
+		sp.position = Vector2(12.0 + w / 2.0, h * 0.5)
+		root.add_child(sp)
 
 func _select_target(i: int) -> void:
 	var enemies = _enemies()
@@ -612,6 +689,91 @@ func _on_enemy_acted(enemy_index: int, _action: String) -> void:
 	var tw = create_tween()
 	tw.tween_property(slot.root, "position:x", slot.base_pos.x - 56.0, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(slot.root, "position:x", slot.base_pos.x, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# 周目大 Boss 攻击：发射一颗能量粒子球飞向主角，命中后爆散
+	var enemies = _enemies()
+	if enemy_index < enemies.size() and enemies[enemy_index].get("cycle_boss", false):
+		var from = slot.root.position + slot.root.size / 2.0
+		var to = _hero_base_pos + _hero.size / 2.0
+		var col = {
+			"orochi": Color("#7be08a"), "kitsune": Color("#ffd36a"),
+			"colossus": Color("#d8c8a4"), "voidbeast": Color("#c08aff"),
+		}.get(str(enemies[enemy_index].get("cycle_sprite", "voidbeast")), Color("#c08aff"))
+		_spawn_boss_orb(from, to, col)
+
+## 周目 Boss 能量弹：飞行时拖尾、命中爆散；全程一次性自释放，杜绝粒子堆积
+func _spawn_boss_orb(from: Vector2, to: Vector2, col: Color) -> void:
+	# 飞行拖尾（local_coords=false 让粒子留在世界形成尾迹）
+	var orb = CPUParticles2D.new()
+	orb.texture = _pixel_square(col.lerp(Color.WHITE, 0.35))
+	orb.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	orb.local_coords = false
+	orb.amount = 26
+	orb.lifetime = 0.42
+	orb.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE_SURFACE
+	orb.emission_sphere_radius = 7.0
+	orb.spread = 180.0
+	orb.gravity = Vector2.ZERO
+	orb.initial_velocity_min = 4.0
+	orb.initial_velocity_max = 16.0
+	orb.scale_amount_min = 2.0
+	orb.scale_amount_max = 6.0
+	var grad = Gradient.new()
+	grad.set_color(0, Color(col.r, col.g, col.b, 0.95))
+	grad.add_point(0.4, Color(col.r, col.g, col.b, 0.7))
+	grad.set_color(1, Color(col.r, col.g, col.b, 0.0))
+	orb.color_ramp = grad
+	orb.position = from
+	_float_layer.add_child(orb)
+	# 实心核（亮球），随弹飞行
+	var core = TextureRect.new()
+	core.texture = _pixel_square(col.lerp(Color.WHITE, 0.55))
+	core.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	core.stretch_mode = TextureRect.STRETCH_SCALE
+	core.size = Vector2(14, 14)
+	core.pivot_offset = Vector2(7, 7)
+	core.position = from - Vector2(7, 7)
+	core.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_float_layer.add_child(core)
+	var dur = 0.34
+	var tw = create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(orb, "position", to, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(core, "position", to - Vector2(7, 7), dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(func():
+		orb.emitting = false                    # 停止发射，残留粒子在 lifetime 内淡出
+		core.queue_free()
+		_spawn_orb_burst(to, col)               # 命中爆散
+		var t = get_tree().create_timer(orb.lifetime + 0.1)
+		t.timeout.connect(orb.queue_free)       # 一次性定时清理，无堆积
+	)
+
+## 命中爆散：一次性（one_shot）粒子炸开，按 lifetime 后自毁
+func _spawn_orb_burst(pos: Vector2, col: Color) -> void:
+	var b = CPUParticles2D.new()
+	b.texture = _pixel_square(col)
+	b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	b.one_shot = true
+	b.explosiveness = 0.92
+	b.amount = 22
+	b.lifetime = 0.5
+	b.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE_SURFACE
+	b.emission_sphere_radius = 4.0
+	b.spread = 180.0
+	b.gravity = Vector2(0, 90.0)
+	b.initial_velocity_min = 40.0
+	b.initial_velocity_max = 110.0
+	b.scale_amount_min = 2.0
+	b.scale_amount_max = 5.0
+	var g = Gradient.new()
+	g.set_color(0, Color(col.r, col.g, col.b, 1.0))
+	g.set_color(1, Color(col.r, col.g, col.b, 0.0))
+	b.color_ramp = g
+	b.position = pos
+	b.emitting = true
+	_float_layer.add_child(b)
+	var t = get_tree().create_timer(b.lifetime + 0.2)
+	t.timeout.connect(b.queue_free)
+	_spawn_sparks(pos, col.lerp(Color.WHITE, 0.3), 8)
 
 ## 元素触发：在目标头顶弹出触发名（让被动"看得见"）
 func _on_elem_proc(target_idx: int, proc_name: String) -> void:
