@@ -1,0 +1,37 @@
+; Engine Configuration File
+; Godot version: 4.3
+
+[application]
+config/name="Pixel Pathfinder"
+config/description="节点式地图探索 · 回合制战斗 · 装备驱动成长"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+boot_splash/bg_color=Color(0.0627451, 0.0705882, 0.109804, 1)
+config/icon="res://icon.svg"
+
+[autoload]
+GameState="*res://scripts/game_state.gd"
+GameData="*res://scripts/game_data.gd"
+SignalBus="*res://scripts/signal_bus.gd"
+Sfx="*res://scripts/sfx.gd"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/resizable=true
+window/stretch/mode="viewport"
+window/stretch/aspect="keep"
+
+[rendering]
+textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+
+[input]
+ui_accept={"deadzone": 0.5, "events": []}
+ui_select={"deadzone": 0.5, "events": []}
+ui_cancel={"deadzone": 0.5, "events": []}
+
+[layer_names]
+2d_physics/layer_1="UI"
+2d_physics/layer_2="Game"
