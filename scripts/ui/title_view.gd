@@ -8,6 +8,7 @@ extends Control
 var _title_label: Label
 var _subtitle: Label
 var _btn_continue: Button
+var _button_group: VBoxContainer
 var _slot_label: Label
 var _hero_rect: TextureRect
 var _hero_atlas: AtlasTexture
@@ -56,26 +57,28 @@ func _ready() -> void:
 	_hero_rect.texture = _hero_atlas
 	_hero_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_hero_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_hero_rect.position = Vector2(556, 252)
-	_hero_rect.size = Vector2(168, 180)
+	# 40×52 frame at an exact 3× scale: no fractional resampling.
+	_hero_rect.position = Vector2(580, 244)
+	_hero_rect.size = Vector2(120, 156)
 	_hero_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_hero_rect)
 	_refresh_hero_portrait()
 
 	# 按钮组
-	var vbox = VBoxContainer.new()
-	vbox.position = Vector2(510, 440)
-	vbox.size = Vector2(260, 260)
-	vbox.add_theme_constant_override("separation", 10)
-	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(vbox)
+	_button_group = VBoxContainer.new()
+	_button_group.name = "TitleButtonGroup"
+	_button_group.position = Vector2(510, 434)
+	_button_group.size = Vector2(260, 282)
+	_button_group.add_theme_constant_override("separation", 6)
+	_button_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_button_group)
 
-	_btn_continue = _mk_btn(vbox, "继 续 远 征", _on_continue)
-	_mk_btn(vbox, "开 始 新 远 征", _on_new_game)
-	_mk_btn(vbox, "存 档 位", _on_saves)
-	_mk_btn(vbox, "图 鉴", _on_codex)
-	_mk_btn(vbox, "帮 助", _on_help)
-	_mk_btn(vbox, "退 出 游 戏", _on_quit)
+	_btn_continue = _mk_btn(_button_group, "继 续 远 征", _on_continue, "ContinueButton")
+	_mk_btn(_button_group, "开 始 新 远 征", _on_new_game, "NewGameButton")
+	_mk_btn(_button_group, "存 档 位", _on_saves, "SaveSlotsButton")
+	_mk_btn(_button_group, "图 鉴", _on_codex, "CodexButton")
+	_mk_btn(_button_group, "帮 助", _on_help, "HelpButton")
+	_mk_btn(_button_group, "退 出 游 戏", _on_quit, "ExitButton")
 
 	_slot_label = Label.new()
 	_slot_label.add_theme_font_size_override("font_size", 14)
@@ -92,8 +95,9 @@ func _ready() -> void:
 	ver.position = Vector2(1130, 692)
 	add_child(ver)
 
-func _mk_btn(parent: Control, text: String, cb: Callable) -> Button:
+func _mk_btn(parent: Control, text: String, cb: Callable, node_name: String) -> Button:
 	var b = Button.new()
+	b.name = node_name
 	b.text = text
 	b.custom_minimum_size = Vector2(260, 42)
 	b.add_theme_font_size_override("font_size", 19)
@@ -123,7 +127,7 @@ func _process(delta: float) -> void:
 	_t += delta
 	_title_label.position.y = 110 + sin(_t * 1.4) * 6.0
 	if _hero_rect:
-		_hero_rect.position.y = 252 + sin(_t * 2.0) * 4.0
+		_hero_rect.position.y = 244 + round(sin(_t * 2.0) * 4.0)
 
 func _on_continue() -> void:
 	if GameState.load_game():

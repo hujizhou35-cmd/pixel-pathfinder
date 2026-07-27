@@ -1,0 +1,6 @@
+"Input","Expected_Name","Actual_Name","Path","SHA256","Bytes","Status","Notes"
+"Original V10 delivery ZIP","像素探路者V10.zip","像素探路者V10.zip","D:\项目\游戏开发2D\像素探路者V10.zip","BC5A5323ADBD6316F73CF84087CA584957F2D8E0B4A9B1A342D9C37DC45C5EC2","330885134","VERIFIED","Read-only source; work performed in isolated copy"
+"Original V10 Windows EXE","PixelPathfinder.exe","PixelPathfinder.exe","D:\项目\游戏开发2D\像素探路者V10\PixelPathfinder.exe","019FF8D94364D41B7A9DD46FB9C92FA119B1EF9D92D8463D224F56BD818B6EBD","161752256","VERIFIED","Baseline executable only; final executable will be rebuilt"
+"Godot project configuration","project.godot","project.godot","D:\项目\游戏开发2D\_v10_release_work\像素探路者V10\pixel_pathfinder_godot\project.godot","A0FB82D52BB8A8ED9F7EA715613DF2CDFBED2EC0ED1A478D994EC60E444248FD","","VERIFIED","Baseline before V10 UI/GitHub release changes"
+"Title clipping issue screenshot","Conversation attachment","NOT_PRESENT","","","","NOT_AVAILABLE","User-described defect is reproduced and replaced by real runtime regression evidence"
+"Help overflow issue screenshot","Conversation attachment","NOT_PRESENT","","","","NOT_AVAILABLE","User-described defect is reproduced and replaced by real runtime regression evidence"

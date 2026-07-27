@@ -1,6 +1,6 @@
 # Windows EXE 导出指南
 
-本环境无法运行 Godot，因此交付的是完整可导出的项目。导出 EXE 有两条路线，任选其一。
+项目已提供经过验证的 Godot 4.3 Windows x64 自动构建脚本；也可以在编辑器中手动导出。
 
 ## 路线 A：Godot 编辑器（最简单，约 5 分钟）
 
@@ -10,11 +10,13 @@
 4. 菜单「项目 → 导出」→ 已预置 **Windows Desktop** 预设（`export_presets.cfg`）
 5. 点「导出项目」→ 输出 `build/PixelPathfinder.exe`（已配置 embed_pck，单文件即可运行）
 
-> 提示：若导出窗口提示缺少 rcedit（用于自定义 EXE 图标），可忽略 — 不影响导出与运行。
+> v2.0.0 发布要求 Windows FileVersion / ProductVersion 均为
+> `2.0.0.0`。缺少 `rcedit-x64.exe` 会使版本资源不正确，不能忽略。
+> 正式发布请使用下方 `build_windows.ps1`，它会显式调用并校验 rcedit。
 
-## 路线 B：Claude Code 命令行（headless 自动化）
+## 路线 B：命令行自动构建（推荐）
 
-在能联网下载 Godot 的机器上让 Claude Code 执行：
+准备 Godot 4.3、匹配的导出模板和 rcedit 后，在项目根目录执行：
 
 ```powershell
 # 1. 下载 Godot 4.3 与导出模板
@@ -27,10 +29,10 @@ Expand-Archive templates.tpz -DestinationPath tpz   # tpz 实为 zip
 New-Item -ItemType Directory -Force "$env:APPDATA\Godot\export_templates\4.3.stable"
 Move-Item tpz\templates\* "$env:APPDATA\Godot\export_templates\4.3.stable\"
 
-# 3. 在项目目录中导出（首次先 import 资源）
-cd pixel_pathfinder_godot
-..\godot\Godot_v4.3-stable_win64.exe --headless --path . --import
-..\godot\Godot_v4.3-stable_win64.exe --headless --path . --export-release "Windows Desktop" build/PixelPathfinder.exe
+# 3. 运行测试、导出、版本校验、ZIP 与 SHA-256 封装
+.\build_windows.ps1 `
+  -GodotExe "..\godot\Godot_v4.3-stable_win64_console.exe" `
+  -RceditExe "..\rcedit\rcedit-x64.exe"
 ```
 
 Linux/macOS 上同理，项目内 `build.sh` 已写好对应流程（需 `godot` 在 PATH 中）。

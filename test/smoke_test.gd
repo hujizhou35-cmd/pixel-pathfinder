@@ -337,6 +337,9 @@ func _run() -> void:
 
 	# ---- 9c. 词条上限随稀有度 + 锻打消除 ----
 	var rare_it = EquipmentFactory.generate_item(0, "weapon", GameData.Rarity.RARE)
+	# generate_item() treats min_rarity as a lower bound, so pin this fixture to
+	# RARE before checking the exact two-affix cap.
+	rare_it["rarity"] = GameData.Rarity.RARE
 	rare_it["affixes"] = ["crit", "regen"]
 	rare_it["affix_lv"] = {}
 	_check(not GameState.can_forge_to(rare_it, "burn").ok, "稀有装备词条上限 2 条")

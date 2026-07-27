@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://blxqilp02huks"
+
+[deps]
+
+files=["res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.frame.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.pose.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.anchor.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.x.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.y.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.layer.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.purpose.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.allowed.translation"]
+
+source_file="res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.csv"
+dest_files=["res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.frame.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.pose.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.anchor.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.x.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.y.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.layer.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.purpose.translation", "res://assets/equipment_visuals/hero/Hero_4Frame_Anchor_Map.allowed.translation"]
+
+[params]
+
+compress=1
+delimiter=0

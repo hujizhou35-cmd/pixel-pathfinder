@@ -1,0 +1,7 @@
+﻿Check,Status,Detail
+exe_exists,PASS,D:\项目\游戏开发2D\PixelPathfinder_V9_VisualIntegration_FINAL\pixel_pathfinder_godot\build\PixelPathfinder.exe
+exe_size,PASS,161752256
+pe_x86_64,PASS,PE machine 0x8664
+new_hash,PASS,019FF8D94364D41B7A9DD46FB9C92FA119B1EF9D92D8463D224F56BD818B6EBD
+embedded_pck_marker,PASS,GDPC in appended footer
+no_sidecar_pck,PASS,

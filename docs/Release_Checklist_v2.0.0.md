@@ -1,0 +1,24 @@
+# v2.0.0 release checklist
+
+- [x] V10 input ZIP registered and hashed.
+- [x] Remote repository/release/tag state checked before mutation.
+- [x] Title Exit clipping reproduced and repaired.
+- [x] Help overflow reproduced and repaired with required hierarchy.
+- [x] Saved/empty title states tested.
+- [x] 1280×720, 1366×768, 1600×900, 1920×1080 windows tested.
+- [x] Help top/middle/bottom, keyboard scroll, Esc, and stack return tested.
+- [x] Full gameplay smoke passed (232 checks).
+- [x] Visual integration passed (2,618 assertions).
+- [x] Protected logic hash audit passed (0 differences).
+- [x] Post-fix screenshots refreshed and reviewed.
+- [x] English/Chinese README and real runtime banner added.
+- [x] Exact three-author attribution added.
+- [x] MIT license and third-party notices added.
+- [x] Windows x64 embedded-PCK EXE built.
+- [x] FileVersion/ProductVersion verified as 2.0.0.0.
+- [x] EXE/ZIP SHA-256 sums generated.
+- [x] Clean ZIP extraction and GUI launch passed.
+- [ ] `main` commit pushed.
+- [ ] Annotated `v2.0.0` tag pushed.
+- [ ] Formal latest GitHub Release published with three assets.
+- [ ] Remote download hashes and fresh tag clone verified.

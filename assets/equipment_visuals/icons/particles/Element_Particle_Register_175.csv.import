@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://yotnl7mmypcg"
+
+[deps]
+
+files=["res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.base.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.slot.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.element.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.pixel.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.connected.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.base.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.overlap.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.status.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.notes.translation"]
+
+source_file="res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.csv"
+dest_files=["res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.base.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.slot.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.element.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.pixel.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.connected.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.base.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.overlap.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.status.translation", "res://assets/equipment_visuals/icons/particles/Element_Particle_Register_175.notes.translation"]
+
+[params]
+
+compress=1
+delimiter=0

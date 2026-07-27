@@ -1,0 +1,4 @@
+WARNING: 资源修改: 无法在“D:/项目/游戏开发2D/_toolchains/godot-4.3/rcedit/rcedit-x64.exe”找到 rcedit 可执行文件。
+     at: add_message (editor/export/editor_export_platform.h:179)
+WARNING: Project export for preset "Windows Desktop" completed with warnings.
+     at: _fs_changed (editor/editor_node.cpp:1033)

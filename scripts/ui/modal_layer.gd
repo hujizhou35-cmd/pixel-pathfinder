@@ -118,7 +118,9 @@ func _rebuild() -> void:
 	for c in _panel.get_children():
 		_panel.remove_child(c)
 		c.queue_free()
+	_panel.custom_minimum_size = Vector2(900, 620) if _current_type == "help" else Vector2.ZERO
 	var content = VBoxContainer.new()
+	content.name = "ModalContent"
 	content.add_theme_constant_override("separation", 10)
 	_panel.add_child(content)
 
@@ -149,19 +151,20 @@ func _rebuild() -> void:
 	# 居中
 	await get_tree().process_frame
 	_panel.reset_size()
-	_panel.position = (Vector2(1280, 720) - _panel.size) / 2.0
+	_panel.position = (get_viewport_rect().size - _panel.size) / 2.0
 	_panel.pivot_offset = _panel.size / 2.0
 
 # ------------------------------------------------------------
 # 通用构件
 # ------------------------------------------------------------
-func _title(parent: Control, text: String, color: Color = UITheme.C_GOLD) -> void:
+func _title(parent: Control, text: String, color: Color = UITheme.C_GOLD) -> Label:
 	var l = Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", 26)
 	l.add_theme_color_override("font_color", color)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	parent.add_child(l)
+	return l
 
 func _text(parent: Control, text: String, size: int = 16, color: Color = UITheme.C_TEXT, center: bool = true, min_w: float = 440.0) -> Label:
 	var l = Label.new()
@@ -202,7 +205,7 @@ func _separator(parent: Control) -> void:
 func _item_card(parent: Control, item: Dictionary, compact: bool = false) -> void:
 	var card = PanelContainer.new()
 	var rc = UITheme.rarity_color(item.rarity)
-	card.add_theme_stylebox_override("panel", UITheme.flat_box(Color(0.08, 0.1, 0.16, 0.9), rc, 2, 12, 10))
+	card.add_theme_stylebox_override("panel", UITheme.flat_box(Color(0.08, 0.1, 0.16, 0.9), UITheme.C_BORDER, 2, 12, 10))
 	parent.add_child(card)
 	var v = VBoxContainer.new()
 	v.add_theme_constant_override("separation", 3)
@@ -216,8 +219,8 @@ func _item_card(parent: Control, item: Dictionary, compact: bool = false) -> voi
 	icon.texture = PixelArt.item_icon(item)
 	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.stretch_mode = TextureRect.STRETCH_SCALE
-	icon.custom_minimum_size = Vector2(28, 28)
-	icon.size = Vector2(28, 28)
+	icon.custom_minimum_size = Vector2(40, 40)
+	icon.size = Vector2(40, 40)
 	head_row.add_child(icon)
 	var nm = Label.new()
 	var lvl_txt = (" +%d" % item.level) if item.level > 0 else ""
@@ -441,7 +444,7 @@ func _build_bag_hero(parent: Control) -> void:
 	fig.texture = atlas
 	fig.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	fig.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	fig.custom_minimum_size = Vector2(hsz.x * 3.2, hsz.y * 3.2)
+	fig.custom_minimum_size = Vector2(hsz.x * 3.0, hsz.y * 3.0)
 	row.add_child(fig)
 
 	# 属性概览
@@ -507,7 +510,8 @@ func _build_bag_equip(parent: Control) -> void:
 ## 单个装备槽方块（含图标/部位/名称，点击进入详情或提示空槽）
 func _equip_slot_box(parent: Control, slot: String) -> void:
 	var it = GameState.equipment.get(slot)
-	var bc = UITheme.rarity_color(it.rarity) if it else Color("#3a4660")
+	var bc = Color("#3a4660")
+	var name_color = UITheme.rarity_color(it.rarity) if it else UITheme.C_TEXT_DIM
 	var box = PanelContainer.new()
 	box.add_theme_stylebox_override("panel", UITheme.flat_box(Color(0.09, 0.11, 0.17, 0.95), bc, 2, 10, 8))
 	box.custom_minimum_size = Vector2(196, 64)
@@ -541,7 +545,7 @@ func _equip_slot_box(parent: Control, slot: String) -> void:
 	var nl = Label.new()
 	if it:
 		nl.text = "%s%s" % [it.get("name", it.base_name), (" +%d" % it.level) if it.level > 0 else ""]
-		nl.add_theme_color_override("font_color", bc)
+		nl.add_theme_color_override("font_color", name_color)
 	else:
 		nl.text = "— 空 —"
 		nl.add_theme_color_override("font_color", UITheme.C_TEXT_DIM)
@@ -561,7 +565,7 @@ func _equip_slot_box(parent: Control, slot: String) -> void:
 func _bag_item_cell(parent: Control, it: Dictionary, idx: int, is_open: bool) -> void:
 	var rc = UITheme.rarity_color(it.rarity)
 	var cell = PanelContainer.new()
-	cell.add_theme_stylebox_override("panel", UITheme.flat_box(Color(0.08, 0.10, 0.16, 0.95), rc, 2, 10, 8))
+	cell.add_theme_stylebox_override("panel", UITheme.flat_box(Color(0.08, 0.10, 0.16, 0.95), UITheme.C_BORDER, 2, 10, 8))
 	cell.custom_minimum_size = Vector2(326, 0)
 	cell.mouse_filter = Control.MOUSE_FILTER_STOP
 	parent.add_child(cell)
@@ -579,7 +583,7 @@ func _bag_item_cell(parent: Control, it: Dictionary, idx: int, is_open: bool) ->
 	icon.texture = PixelArt.item_icon(it)
 	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(30, 30)
+	icon.custom_minimum_size = Vector2(40, 40)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(icon)
@@ -940,7 +944,30 @@ func _stats_block(c: VBoxContainer, stats: Dictionary) -> void:
 # 帮助
 # ------------------------------------------------------------
 func _build_help(c: VBoxContainer) -> void:
-	_title(c, "冒 险 指 南")
+	c.name = "HelpModalRoot"
+	c.custom_minimum_size = Vector2(860, 580)
+	var heading = _title(c, "冒 险 指 南")
+	heading.name = "HelpTitle"
+
+	var scroll = ScrollContainer.new()
+	scroll.name = "HelpScrollContainer"
+	scroll.custom_minimum_size = Vector2(840, 450)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.focus_mode = Control.FOCUS_ALL
+	scroll.follow_focus = true
+	scroll.gui_input.connect(_on_help_scroll_gui_input.bind(scroll))
+	c.add_child(scroll)
+
+	var help_content = VBoxContainer.new()
+	help_content.name = "HelpContentVBox"
+	help_content.custom_minimum_size = Vector2(800, 0)
+	help_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	help_content.add_theme_constant_override("separation", 8)
+	scroll.add_child(help_content)
+
 	var lines = [
 		"◆ 目标：穿越 5 大区域击败首领 — 通关后进入更强的「强化周目」，无限循环。",
 		"◆ 地图路线探索：用 WASD 沿虚线移动小人，按 E 进入所站节点；可折返换路。",
@@ -967,9 +994,36 @@ func _build_help(c: VBoxContainer) -> void:
 		"◆ 快捷键：B 背包 · C 图鉴 · V 属性 · Esc 关闭窗口。",
 	]
 	for line in lines:
-		_text(c, line, 15, UITheme.C_TEXT, false)
+		_text(help_content, line, 15, UITheme.C_TEXT, false, 780.0)
 	var r = _btn_row(c)
-	_btn(r, "明白了", close, 150.0)
+	r.name = "HelpButtonRow"
+	var close_button = _btn(r, "关闭 [Esc]", close, 150.0)
+	close_button.name = "HelpCloseButton"
+	scroll.call_deferred("grab_focus")
+
+func _on_help_scroll_gui_input(event: InputEvent, scroll: ScrollContainer) -> void:
+	if not event is InputEventKey or not event.pressed or event.echo:
+		return
+	var page_step = maxi(32, int(scroll.size.y * 0.82))
+	match event.keycode:
+		KEY_UP:
+			scroll.scroll_vertical -= 32
+			scroll.accept_event()
+		KEY_DOWN:
+			scroll.scroll_vertical += 32
+			scroll.accept_event()
+		KEY_PAGEUP:
+			scroll.scroll_vertical -= page_step
+			scroll.accept_event()
+		KEY_PAGEDOWN:
+			scroll.scroll_vertical += page_step
+			scroll.accept_event()
+		KEY_HOME:
+			scroll.scroll_vertical = 0
+			scroll.accept_event()
+		KEY_END:
+			scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value)
+			scroll.accept_event()
 
 # ------------------------------------------------------------
 # 装备详情
@@ -1561,7 +1615,7 @@ func _codex_equip(v: VBoxContainer) -> void:
 		icon.texture = PixelArt.item_icon({ "family": entry.base, "element": entry.element })
 		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		icon.stretch_mode = TextureRect.STRETCH_SCALE
-		icon.custom_minimum_size = Vector2(24, 24)
+		icon.custom_minimum_size = Vector2(20, 20)
 		row.add_child(icon)
 		var ed = GameData.ELEMENTS[entry.element]
 		var nl = Label.new()

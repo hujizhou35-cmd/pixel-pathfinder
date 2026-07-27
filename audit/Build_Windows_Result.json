@@ -1,0 +1,21 @@
+﻿{
+    "status":  "PASS",
+    "godot_exe":  "D:\\项目\\游戏开发2D\\装备美化尝试\\外观最后合并\\_toolchains\\godot-4.3\\editor\\Godot_v4.3-stable_win64_console.exe",
+    "godot_version":  "4.3.stable.official.77dcf97d8",
+    "rcedit_exe":  "D:\\项目\\游戏开发2D\\装备美化尝试\\外观最后合并\\_toolchains\\godot-4.3\\rcedit\\rcedit-x64.exe",
+    "export_preset":  "Windows Desktop",
+    "output":  "D:\\项目\\游戏开发2D\\_v10_release_work\\像素探路者V10\\pixel_pathfinder_godot\\build\\PixelPathfinder.exe",
+    "bytes":  163884672,
+    "sha256":  "2C637A575C07C54636FE898598F8CD553EBB7CB0EDDCD2F7607DA293E4CA527E",
+    "created_utc":  "2026-07-27T13:55:54.1120950Z",
+    "pe_machine":  "x86_64",
+    "file_version":  "2.0.0.0",
+    "product_version":  "2.0.0.0",
+    "embedded_pck_configured":  true,
+    "sidecar_pck_count":  0,
+    "release_exe":  "D:\\项目\\游戏开发2D\\_v10_release_work\\像素探路者V10\\pixel_pathfinder_godot\\release\\PixelPathfinder_v2.0.0_Windows_x64.exe",
+    "release_exe_sha256":  "2C637A575C07C54636FE898598F8CD553EBB7CB0EDDCD2F7607DA293E4CA527E",
+    "release_zip":  "D:\\项目\\游戏开发2D\\_v10_release_work\\像素探路者V10\\pixel_pathfinder_godot\\release\\PixelPathfinder_v2.0.0_Windows_x64.zip",
+    "release_zip_sha256":  "AB63E7BE141BDD5B14DE08038C9797115ED3C7227BD3CC305D055E61B8EDAEEA",
+    "release_hashes":  "D:\\项目\\游戏开发2D\\_v10_release_work\\像素探路者V10\\pixel_pathfinder_godot\\release\\SHA256SUMS.txt"
+}

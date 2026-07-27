@@ -188,9 +188,10 @@ func _build_side_panel() -> void:
 		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		icon.offset_left = 8
-		icon.offset_top = 6
-		icon.offset_right = -8
+		# 20×20 source at exact 2× integer scale.
+		icon.offset_left = 10
+		icon.offset_top = 8
+		icon.offset_right = -10
 		icon.offset_bottom = -10
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(icon)
@@ -289,9 +290,9 @@ func refresh_equipment() -> void:
 			entry.icon.texture = PixelArt.item_icon(it)
 			entry.icon.visible = true
 			entry.lvl.text = "+%d" % it.level if it.level > 0 else ""
-			var rc = UITheme.rarity_color(it.rarity)
-			entry.btn.add_theme_stylebox_override("normal", UITheme.flat_box(UITheme.C_PANEL_HI, rc, 2, 4, 4))
-			entry.btn.add_theme_stylebox_override("hover", UITheme.flat_box(Color("#2f3a58"), rc, 3, 4, 4))
+			# Rarity is text-only; equipment slots use a neutral visual frame.
+			entry.btn.add_theme_stylebox_override("normal", UITheme.flat_box(UITheme.C_PANEL_HI, UITheme.C_BORDER, 2, 4, 4))
+			entry.btn.add_theme_stylebox_override("hover", UITheme.flat_box(Color("#2f3a58"), Color("#697895"), 3, 4, 4))
 		else:
 			entry.icon.visible = false
 			entry.lvl.text = ""

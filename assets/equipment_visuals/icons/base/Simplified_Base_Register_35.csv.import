@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dsb68aiiq8c7c"
+
+[deps]
+
+files=["res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.base.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.slot.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.grade.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.icon.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.sheet.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.icon.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.sheet.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.design.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.status.translation"]
+
+source_file="res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.csv"
+dest_files=["res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.base.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.slot.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.grade.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.icon.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.sheet.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.icon.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.sheet.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.design.translation", "res://assets/equipment_visuals/icons/base/Simplified_Base_Register_35.status.translation"]
+
+[params]
+
+compress=1
+delimiter=0

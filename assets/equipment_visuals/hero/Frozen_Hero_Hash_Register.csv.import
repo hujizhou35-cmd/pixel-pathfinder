@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://bt8jtjyelhkwo"
+
+[deps]
+
+files=["res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.patch3.translation", "res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.patch4.translation", "res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.hash.translation", "res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.status.translation"]
+
+source_file="res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.csv"
+dest_files=["res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.patch3.translation", "res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.patch4.translation", "res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.hash.translation", "res://assets/equipment_visuals/hero/Frozen_Hero_Hash_Register.status.translation"]
+
+[params]
+
+compress=1
+delimiter=0

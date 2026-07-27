@@ -1,0 +1,23 @@
+WARNING: Target object freed before starting, aborting Tweener.
+     at: start (scene/animation/tween.cpp:550)
+WARNING: Target object freed before starting, aborting Tweener.
+     at: start (scene/animation/tween.cpp:550)
+WARNING: Target object freed before starting, aborting Tweener.
+     at: start (scene/animation/tween.cpp:550)
+WARNING: Target object freed before starting, aborting Tweener.
+     at: start (scene/animation/tween.cpp:550)
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+     at: cleanup (core/object/object.cpp:2284)
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+     at: cleanup (core/object/object.cpp:2284)
+WARNING: èµ„æºä¿®æ”¹: æ— æ³•åœ¨â€œD:/é¡¹ç›®/æ¸¸æˆå¼€å‘2D/_toolchains/godot-4.3/rcedit/rcedit-x64.exeâ€æ‰¾åˆ° rcedit å¯æ‰§è¡Œæ–‡ä»¶ã€‚
+     at: add_message (editor/export/editor_export_platform.h:179)
+WARNING: Project export for preset "Windows Desktop" completed with warnings.
+     at: _fs_changed (editor/editor_node.cpp:1033)
+Windows FileVersion mismatch: expected 2.0.0.0, got 4.3
+ËùÔÚÎ»ÖÃ D:\ÏîÄ¿\ÓÎÏ·¿ª·¢2D\_v10_release_work\ÏñËØÌ½Â·ÕßV10\pixel_pathfinder_godot\build_windows.ps1:119 ×Ö·û: 5
++     throw "Windows FileVersion mismatch: expected 2.0.0.0, got $($ver ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Windows FileVer....0.0.0, got 4.3:String) [], RuntimeException
+    + FullyQualifiedErrorId : Windows FileVersion mismatch: expected 2.0.0.0, got 4.3
+ 
