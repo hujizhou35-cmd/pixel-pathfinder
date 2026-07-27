@@ -1,0 +1,15 @@
+﻿order,layer,runtime_scale,runtime_rotation_degrees
+1,background_element_fx,1,0
+2,accessory_back,1,0
+3,weapon_back,1,0
+4,neutral_body,1,0
+5,pants,1,0
+6,boots,1,0
+7,armor,1,0
+8,face_head_hair,1,0
+9,helmet,1,0
+10,back_arm,1,0
+11,front_arm,1,0
+12,weapon_front,1,0
+13,accessory_front,1,0
+14,foreground_element_fx,1,0

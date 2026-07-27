@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dib1rvb1xbina"
+
+[deps]
+
+files=["res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.base.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.slot.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.element.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.pixel.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.connected.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.base.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.overlap.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.status.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.notes.translation"]
+
+source_file="res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.csv"
+dest_files=["res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.base.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.slot.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.element.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.pixel.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.connected.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.base.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.particle.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.overlap.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.status.translation", "res://assets/equipment_visuals/icons/particles/Particle_Pixel_Budget_175.notes.translation"]
+
+[params]
+
+compress=1
+delimiter=0

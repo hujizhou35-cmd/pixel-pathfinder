@@ -25,7 +25,6 @@ var _hero: TextureRect
 var _hero_atlas: AtlasTexture
 var _hero_frame_h: float = 26.0
 var _hero_base_pos: Vector2
-var _armor_glow: ColorRect
 
 var _enemy_slots: Array = []   # [{root, sprite, atlas, hp_bar, hp_lbl, shield_lbl, name_lbl, tag_lbl, status_lbl, frame_h, base_pos, ring}]
 var _selected: int = -1
@@ -44,15 +43,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	# 护甲光环（脚底辉光，颜色 = 护甲稀有度）
-	_armor_glow = ColorRect.new()
-	_armor_glow.size = Vector2(96, 10)
-	_armor_glow.position = Vector2(HERO_POS.x - 48, GROUND_Y - 4)
-	_armor_glow.color = Color(1, 1, 1, 0.0)
-	_armor_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_armor_glow)
-
-	# 英雄（程序化合成，随装备变化）
+	# 英雄（PATCH4 运行时合成；稀有度只显示为文字）
 	_hero_atlas = AtlasTexture.new()
 	_hero = TextureRect.new()
 	_hero.texture = _hero_atlas
@@ -147,7 +138,7 @@ func _mk_action(parent: Control, text: String, cb: Callable) -> Button:
 	return b
 
 # ------------------------------------------------------------
-# 英雄装备外观：整体合成精灵 + 护甲稀有度光环
+# 英雄装备外观：整体合成精灵
 # ------------------------------------------------------------
 func _refresh_hero_gear() -> void:
 	var tex = PixelArt.hero_texture(GameState.equipment)
@@ -159,13 +150,6 @@ func _refresh_hero_gear() -> void:
 	_hero_base_pos = Vector2(HERO_POS.x - _hero.size.x / 2.0, HERO_POS.y - _hero.size.y)
 	_hero.position = _hero_base_pos
 	_hero.pivot_offset = Vector2(_hero.size.x / 2.0, _hero.size.y)
-
-	var armor = GameState.equipment.get("armor")
-	if armor:
-		var rc = UITheme.rarity_color(armor.rarity)
-		_armor_glow.color = Color(rc.r, rc.g, rc.b, 0.28 + 0.08 * armor.rarity)
-	else:
-		_armor_glow.color = Color(1, 1, 1, 0.0)
 
 # ------------------------------------------------------------
 # 战斗建立 / 敌人槽位
@@ -894,10 +878,6 @@ func _process(delta: float) -> void:
 	if not visible:
 		return
 	_anim_t += delta
-	# 护甲光环呼吸
-	var glow_a = _armor_glow.color.a
-	if glow_a > 0.01:
-		_armor_glow.color.a = glow_a + (0.30 + 0.10 * sin(_anim_t * 3.0) - glow_a) * 0.2
 	if _anim_t >= 0.45:
 		_anim_t = 0.0
 		_frame_flip = not _frame_flip

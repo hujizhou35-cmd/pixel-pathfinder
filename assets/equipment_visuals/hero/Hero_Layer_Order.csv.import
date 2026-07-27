@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://bnbedkvn234mt"
+
+[deps]
+
+files=["res://assets/equipment_visuals/hero/Hero_Layer_Order.layer.translation", "res://assets/equipment_visuals/hero/Hero_Layer_Order.runtime.translation", "res://assets/equipment_visuals/hero/Hero_Layer_Order.runtime.translation"]
+
+source_file="res://assets/equipment_visuals/hero/Hero_Layer_Order.csv"
+dest_files=["res://assets/equipment_visuals/hero/Hero_Layer_Order.layer.translation", "res://assets/equipment_visuals/hero/Hero_Layer_Order.runtime.translation", "res://assets/equipment_visuals/hero/Hero_Layer_Order.runtime.translation"]
+
+[params]
+
+compress=1
+delimiter=0

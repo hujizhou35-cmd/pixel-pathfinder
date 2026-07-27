@@ -59,7 +59,8 @@ func _ready() -> void:
 	_hero_marker.texture = _hero_atlas
 	_hero_marker.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_hero_marker.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_hero_marker.size = Vector2(56, 64)
+	# Native 40×52 frame: keep the map marker on the pixel grid.
+	_hero_marker.size = Vector2(40, 52)
 	_hero_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hero_marker.visible = false
 	add_child(_hero_marker)
@@ -201,7 +202,7 @@ func _place_hero_marker() -> void:
 	if not _hero_marker:
 		return
 	var p = _hero_screen_pos()
-	_hero_marker.position = p + Vector2(26, -70)
+	_hero_marker.position = p + Vector2(34, -58)
 	_hero_marker.visible = true
 
 func _update_enter_label() -> void:
@@ -283,7 +284,7 @@ func _try_move(dir: Vector2) -> void:
 func _animate_hero_to(node_id: int) -> void:
 	var p: Vector2 = _node_pos.get(node_id, START_POS)
 	var tw = create_tween()
-	tw.tween_property(_hero_marker, "position", p + Vector2(26, -70), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_hero_marker, "position", p + Vector2(34, -58), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 ## 进入小人所站节点（战斗类先弹侦察预览）
 func _try_enter_current() -> void:
@@ -328,6 +329,6 @@ func _process(delta: float) -> void:
 				continue
 			b.modulate = Color(pulse, pulse, pulse * 0.85 + 0.15, 1.0)
 	if _hero_marker and _hero_marker.visible:
-		_hero_marker.position.y += sin(_t * 5.0) * 0.15
+		_hero_marker.position = _hero_marker.position.round()
 	if _enter_label and _enter_label.visible:
 		_enter_label.modulate.a = 0.7 + 0.3 * sin(_t * 5.0)

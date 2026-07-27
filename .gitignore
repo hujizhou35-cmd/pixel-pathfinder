@@ -1,5 +1,27 @@
-# Godot 4+ specific ignores
+# Godot cache and generated translations
 .godot/
-android/
-build/
+*.translation
+
+# Builds and release packages
+/build/
+/release/
+/_toolchains/
+/.tools/
+*.exe
+*.pck
+*.zip
+*.7z
+
+# Generated test evidence
+tests/shots/
+tests/shots_v2_ui/
+tests/shots_equipment_runtime/
+
+# Local state
 *.tmp
+*.bak
+.env
+.env.*
+save_slot_*.json
+settings.json
+pixel_pathfinder_save.json
