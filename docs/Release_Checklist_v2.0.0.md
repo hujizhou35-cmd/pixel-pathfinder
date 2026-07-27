@@ -18,7 +18,7 @@
 - [x] FileVersion/ProductVersion verified as 2.0.0.0.
 - [x] EXE/ZIP SHA-256 sums generated.
 - [x] Clean ZIP extraction and GUI launch passed.
-- [ ] `main` commit pushed.
-- [ ] Annotated `v2.0.0` tag pushed.
-- [ ] Formal latest GitHub Release published with three assets.
-- [ ] Remote download hashes and fresh tag clone verified.
+- [x] `main` release commit pushed by ordinary fast-forward.
+- [x] Annotated `v2.0.0` tag pushed.
+- [x] Formal latest GitHub Release published with three assets.
+- [x] Remote asset digests, download start, and fresh tag clone verified.
